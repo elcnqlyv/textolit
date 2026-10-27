@@ -53,7 +53,7 @@ rules:
     confidence: med
     severity: low
     cwe: CWE-306
-    owasp_iot: I2
+    owasp_iot: I10
     pattern: '^[^#\n]*(?:askfirst|respawn)[^#\n]*(?:-?/bin/(?:ba|a)?sh)\b'
     globs: ['*/inittab']
     max_per_file: 2

@@ -42,7 +42,7 @@ rules:
     confidence: high
     severity: high
     cwe: CWE-321
-    owasp_iot: I1
+    owasp_iot: I7
     pattern: '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----'
     max_per_file: 1
 
@@ -63,7 +63,7 @@ rules:
     confidence: med
     severity: medium
     cwe: CWE-327
-    owasp_iot: I5
+    owasp_iot: I7
     pattern: '\$1\$[./0-9A-Za-z]{0,8}\$[./0-9A-Za-z]{22}'
     globs: ['*/passwd', '*/shadow', '*/passwd-', '*/shadow-', '*.conf', '*.cfg']
     max_per_file: 5
@@ -74,7 +74,7 @@ rules:
     confidence: med
     severity: medium
     cwe: CWE-916
-    owasp_iot: I5
+    owasp_iot: I7
     pattern: '^[A-Za-z_][\w.-]*:[./0-9A-Za-z]{13}:'
     globs: ['*/passwd', '*/shadow', '*/passwd-', '*/shadow-']
     max_per_file: 5
