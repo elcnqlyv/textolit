@@ -12,6 +12,7 @@ from typing import Any
 from textolit import __version__
 from textolit.core import jobs
 from textolit.core.case import Case, CaseError
+from textolit.core.ledger import decide
 from textolit.modules.base import ModuleResult
 from textolit.modules.registry import builtin_modules
 
@@ -44,6 +45,18 @@ def build_parser() -> argparse.ArgumentParser:
     jl = sub.add_parser("jobs", help="list queued/finished jobs for a case")
     jl.add_argument("case", type=Path)
 
+    fl = sub.add_parser("findings", help="list findings (leads) for a case")
+    fl.add_argument("case", type=Path)
+    fl.add_argument(
+        "--status", default="pending", choices=["pending", "accepted", "rejected", "snoozed", "all"]
+    )
+
+    fd = sub.add_parser("decide", help="accept, reject or snooze a finding")
+    fd.add_argument("case", type=Path)
+    fd.add_argument("finding_id", type=int)
+    fd.add_argument("decision", choices=["accept", "reject", "snooze", "reopen"])
+    fd.add_argument("--note", default="")
+
     for name in builtin_modules():
         p = sub.add_parser(name, help=f"run the {name} module")
         p.add_argument("case", type=Path)
@@ -64,11 +77,55 @@ def _print_result(result: ModuleResult, as_json: bool) -> None:
         print(f"  error: {e}", file=sys.stderr)
 
 
+def _print_netmap(result: ModuleResult) -> None:
+    rows = [t for t in result.data.get("table", []) if t["default_on"]]
+    if not rows:
+        return
+    print(f"  {'port':<11}{'service':<20}{'kind':<9}{'std':<5}source")
+    for t in rows:
+        flag = "NON" if t["nonstandard"] else ""
+        print(
+            f"  {str(t['port']) + '/' + t['proto']:<11}{t['service'][:19]:<20}"
+            f"{t['kind']:<9}{flag:<5}{t['source']}"
+        )
+
+
 def run_module(case: Case, module: str, as_json: bool, **options: Any) -> int:
     job_id = jobs.enqueue(case, module, **options)
     result = jobs.run_job(case, job_id)
     _print_result(result, as_json)
-    return 0 if result.ok else 1
+    if module == "netmap" and result.ok and not as_json:
+        _print_netmap(result)
+    ok = result.ok
+    # follow-up jobs queued by this one (e.g. the rule sweep) run now, so the CLI never
+    # leaves evidence unexamined.
+    for follow in jobs.drain(case):
+        _print_result(follow, as_json)
+        ok = ok and follow.ok
+    return 0 if ok else 1
+
+
+def list_findings(case: Case, status: str) -> int:
+    q = (
+        "SELECT id, confidence, severity, status, title, evidence_path, "
+        "(SELECT line FROM evidence_links WHERE finding_id=findings.id LIMIT 1) AS line "
+        "FROM findings"
+    )
+    args: tuple[str, ...] = ()
+    if status != "all":
+        q += " WHERE status=?"
+        args = (status,)
+    order = "CASE confidence WHEN 'high' THEN 0 WHEN 'med' THEN 1 ELSE 2 END, id"
+    rows = case.conn.execute(f"{q} ORDER BY {order}", args).fetchall()
+    for r in rows:
+        where = r["evidence_path"] + (f":{r['line']}" if r["line"] else "")
+        print(
+            f"{r['id']:>5} [{r['confidence']:<4}] {r['severity']:<7} {r['status']:<9} {r['title']}"
+        )
+        print(f"        {where}")
+    pending = case.conn.execute("SELECT count(*) FROM findings WHERE status='pending'")
+    print(f"{len(rows)} shown; {pending.fetchone()[0]} leads pending review")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -86,6 +143,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         case = Case.open(args.case)
         jobs.mark_interrupted(case)
+        if args.command == "findings":
+            return list_findings(case, args.status)
+        if args.command == "decide":
+            status = {
+                "accept": "accepted",
+                "reject": "rejected",
+                "snooze": "snoozed",
+                "reopen": "pending",
+            }[args.decision]
+            try:
+                decide(case, args.finding_id, status, args.note)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            print(f"finding {args.finding_id}: {status}")
+            return 0
         if args.command == "tui":
             from textolit.ui.app import TextolitApp
 
