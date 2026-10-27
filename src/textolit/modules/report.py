@@ -10,6 +10,7 @@ from textolit.core.ledger import add_artifact
 from textolit.modules.base import ModuleResult, ProgressFn, no_progress
 from textolit.redact import mask as _mask
 from textolit.redact import mask_snippet as _mask_snippet
+from textolit.taxonomy import OWASP_IOT
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
@@ -20,18 +21,6 @@ def _table(headers: list[str], rows: list[list[Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-OWASP_IOT = {
-    "I1": "Weak, Guessable, or Hardcoded Passwords",
-    "I2": "Insecure Network Services",
-    "I3": "Insecure Ecosystem Interfaces",
-    "I4": "Lack of Secure Update Mechanism",
-    "I5": "Use of Insecure or Outdated Components",
-    "I6": "Insufficient Privacy Protection",
-    "I7": "Insecure Data Transfer and Storage",
-    "I8": "Lack of Device Management",
-    "I9": "Insecure Default Settings",
-    "I10": "Lack of Physical Hardening",
-}
 CONF_ORDER = {"high": 0, "med": 1, "low": 2}
 
 
