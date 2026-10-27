@@ -140,3 +140,49 @@ async def _review_flow(tmp_path: Path) -> None:
         await pilot.pause()
         statuses = {r[0] for r in case.conn.execute("SELECT status FROM findings")}
         assert "rejected" in statuses
+
+
+def test_crack_tab_controls(tmp_path: Path) -> None:
+    asyncio.run(_crack_flow(tmp_path))
+
+
+async def _crack_flow(tmp_path: Path) -> None:
+    from textual.widgets import DataTable
+
+    from textolit import crack
+    from textolit.hashcat import Profile
+
+    case = Case.create(tmp_path / "c")
+    case.conn.execute(
+        "INSERT INTO crypto_materials(kind,algo,value,source_path,hashcat_mode,username,"
+        "source_line,cracked) VALUES ('hash','md5','5f4dcc3b5aa765d61d8327deb882cf99',"
+        "'artifacts/x/etc/shadow',0,'root',1,'password')"
+    )
+    case.conn.execute(
+        "INSERT INTO crypto_materials(kind,algo,value,source_path,hashcat_mode,username,"
+        "source_line) VALUES ('hash','md5','ffffffffffffffffffffffffffffffff',"
+        "'artifacts/x/etc/shadow',0,'op',2)"
+    )
+    case.conn.commit()
+    crack.plan_tasks(case, Profile(binary="hashcat"))
+    app = TextolitApp(case, splash=False, worker=False)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await pilot.pause()
+        crypto = app.query_one("#crypto", DataTable)
+        assert crypto.row_count == 2
+        flat = str([crypto.get_row_at(i) for i in range(2)])
+        assert "pa***" in flat and "password" not in flat  # cracked secret is masked
+        app.query_one("TabbedContent").active = "tab-crack"
+        await pilot.pause()
+        table = app.query_one("#crack", DataTable)
+        assert table.row_count == 2
+        table.focus()
+        await pilot.press("space")  # queued task -> paused
+        await pilot.pause()
+        assert crack.list_tasks(case)[0].status == "paused"
+        await pilot.press("space")  # paused -> queued again
+        await pilot.pause()
+        assert crack.list_tasks(case)[0].status == "queued"
+        await pilot.press("x")  # cancel
+        await pilot.pause()
+        assert crack.list_tasks(case)[0].status == "cancelled"

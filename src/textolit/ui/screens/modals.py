@@ -13,6 +13,7 @@ F3   cycle findings filter F4   job queue
 F5   LLM on/off (confirm)  F6   export Markdown report
 F10  quit (guarded)        p    queue the full pipeline
 a/x/s  accept / reject / snooze the selected finding (Findings tab)
+g      plan and run hashcat attacks   space  pause/resume   x  cancel (Crack tab)
 Tab/Shift+Tab move focus   Enter on a command row loads its raw output
 
 Everything runs through the case ledger; state survives a killed TUI."""

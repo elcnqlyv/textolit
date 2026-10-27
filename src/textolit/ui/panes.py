@@ -247,3 +247,104 @@ class NetMapPane(Vertical):
                 for r in rows
             ],
         )
+
+
+class CryptoPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static("Hashes, certificates and keys (secrets are masked)", classes="heading")
+        yield DataTable(id="crypto", cursor_type="row")
+
+    def on_mount(self) -> None:
+        self.query_one("#crypto", DataTable).add_columns(
+            "kind", "algo", "user", "-m", "cracked", "source"
+        )
+
+    def refresh_data(self, case: Case) -> None:
+        rows = case.conn.execute("SELECT * FROM crypto_materials ORDER BY kind, id").fetchall()
+        sync_table(
+            self.query_one("#crypto", DataTable),
+            [
+                (
+                    r["kind"],
+                    r["algo"] or "-",
+                    r["username"] or "-",
+                    r["hashcat_mode"] if r["hashcat_mode"] is not None else "-",
+                    (r["cracked"][:2] + "***") if r["cracked"] else "",
+                    f"{r['source_path']}:{r['source_line'] or ''}",
+                )
+                for r in rows
+            ],
+        )
+
+
+class WebPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Web surface (static): roots, servers, auth, endpoints, uploads", classes="heading"
+        )
+        yield DataTable(id="web", cursor_type="row")
+
+    def on_mount(self) -> None:
+        self.query_one("#web", DataTable).add_columns("category", "key", "value", "conf", "source")
+
+    def refresh_data(self, case: Case) -> None:
+        rows = case.conn.execute(
+            "SELECT * FROM web_surface ORDER BY CASE category WHEN 'server' THEN 0"
+            " WHEN 'auth' THEN 1 WHEN 'upload' THEN 2 WHEN 'credential' THEN 3"
+            " WHEN 'root' THEN 4 ELSE 5 END, id LIMIT 2000"
+        ).fetchall()
+        sync_table(
+            self.query_one("#web", DataTable),
+            [
+                (
+                    r["category"],
+                    r["key"][:60],
+                    "***"
+                    if r["category"] == "credential" and r["key"] != "prefilled-username"
+                    else r["value"][:40],
+                    r["confidence"],
+                    f"{r['source_path'].rsplit('/', 3)[-1]}:{r['source_line'] or ''}",
+                )
+                for r in rows
+            ],
+        )
+
+
+class CrackPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Crack queue: g plan+run, space pause/resume, x cancel (hashcat, -w 2 profile)",
+            classes="heading",
+        )
+        yield DataTable(id="crack", cursor_type="row")
+
+    def on_mount(self) -> None:
+        self.query_one("#crack", DataTable).add_columns(
+            "id", "status", "progress", "speed", "found", "attack", "message"
+        )
+
+    def selected(self) -> tuple[int, str] | None:
+        table = self.query_one("#crack", DataTable)
+        if table.row_count == 0:
+            return None
+        row = table.get_row_at(table.cursor_row)
+        return int(row[0]), str(row[1])
+
+    def refresh_data(self, case: Case) -> None:
+        from textolit import crack
+
+        sync_table(
+            self.query_one("#crack", DataTable),
+            [
+                (
+                    t.id,
+                    t.status,
+                    f"{blocks(t.progress, 8)} {t.progress:4.0%}",
+                    t.speed or "-",
+                    f"{t.recovered}/{t.total}",
+                    t.label,
+                    t.message[:50],
+                )
+                for t in crack.list_tasks(case)
+            ],
+        )

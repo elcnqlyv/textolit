@@ -11,17 +11,22 @@ from textual.binding import Binding
 from textual.theme import Theme
 from textual.widgets import DataTable, Footer, RichLog, Static, TabbedContent, TabPane
 
+from textolit import crack
 from textolit.core import jobs
 from textolit.core.case import Case
 from textolit.core.ledger import decide
+from textolit.hashcat import Profile
 from textolit.ui.panes import (
     ArtifactsPane,
     CommandsPane,
+    CrackPane,
+    CryptoPane,
     DashboardPane,
     EntropyPane,
     FindingsPane,
     JobsPane,
     NetMapPane,
+    WebPane,
 )
 from textolit.ui.screens.modals import ConfirmScreen, HelpScreen
 from textolit.ui.screens.splash import SplashScreen
@@ -61,6 +66,8 @@ class TextolitApp(App[None]):
         Binding("a", "decide('accepted')", "Accept"),
         Binding("x", "decide('rejected')", "Reject"),
         Binding("s", "decide('snoozed')", "Snooze"),
+        Binding("g", "crack_plan", "Crack plan"),
+        Binding("space", "crack_toggle", "Pause/resume"),
     ]
 
     def __init__(self, case: Case, *, splash: bool = True, worker: bool = True) -> None:
@@ -68,7 +75,7 @@ class TextolitApp(App[None]):
         self.case = case
         self._splash = splash
         self._use_worker = worker
-        self._worker: jobs.Worker | None = None
+        self._job_workers: list[jobs.Worker] = []
 
     def compose(self) -> ComposeResult:
         yield Static(TAGLINE, id="brand", markup=False)
@@ -82,6 +89,12 @@ class TextolitApp(App[None]):
                 yield ArtifactsPane(id="pane-artifacts")
             with TabPane("Netmap", id="tab-netmap"):
                 yield NetMapPane(id="pane-netmap")
+            with TabPane("Web", id="tab-web"):
+                yield WebPane(id="pane-web")
+            with TabPane("Crypto", id="tab-crypto"):
+                yield CryptoPane(id="pane-crypto")
+            with TabPane("Crack", id="tab-crack"):
+                yield CrackPane(id="pane-crack")
             with TabPane("Findings", id="tab-findings"):
                 yield FindingsPane(id="pane-findings")
             with TabPane("Jobs", id="tab-jobs"):
@@ -99,16 +112,18 @@ class TextolitApp(App[None]):
         self.query_one("#raw", RichLog).display = False
         jobs.mark_interrupted(self.case)
         if self._use_worker:
-            self._worker = jobs.Worker(self.case)
-            self._worker.start()
+            for long_jobs in (False, True):
+                worker = jobs.Worker(self.case, long_jobs=long_jobs)
+                worker.start()
+                self._job_workers.append(worker)
         self.set_interval(1.0, self.refresh_panes)
         self.refresh_panes()
         if self._splash:
             self.push_screen(SplashScreen())
 
     def on_unmount(self) -> None:
-        if self._worker:
-            self._worker.stop()
+        for worker in self._job_workers:
+            worker.stop()
 
     # -- refresh ---------------------------------------------------------
 
@@ -117,6 +132,9 @@ class TextolitApp(App[None]):
         self.query_one("#pane-entropy", EntropyPane).refresh_data(self.case)
         self.query_one("#pane-artifacts", ArtifactsPane).refresh_data(self.case)
         self.query_one("#pane-netmap", NetMapPane).refresh_data(self.case)
+        self.query_one("#pane-web", WebPane).refresh_data(self.case)
+        self.query_one("#pane-crypto", CryptoPane).refresh_data(self.case)
+        self.query_one("#pane-crack", CrackPane).refresh_data(self.case)
         self.query_one("#pane-findings", FindingsPane).refresh_data(self.case)
         self.query_one("#pane-jobs", JobsPane).refresh_data(self.case)
         self.query_one("#pane-commands", CommandsPane).refresh_data(self.case)
@@ -181,7 +199,11 @@ class TextolitApp(App[None]):
         self.push_screen(ConfirmScreen(question), decide)
 
     def action_decide(self, status: str) -> None:
-        if self.query_one(TabbedContent).active != "tab-findings":
+        tab = self.query_one(TabbedContent).active
+        if tab == "tab-crack" and status == "rejected":
+            self._crack_control("cancel")
+            return
+        if tab != "tab-findings":
             return
         pane = self.query_one("#pane-findings", FindingsPane)
         fid = pane.selected_id()
@@ -190,6 +212,44 @@ class TextolitApp(App[None]):
         decide(self.case, fid, status)
         pane.refresh_data(self.case)
         self.notify(f"finding {fid}: {status}")
+
+    def _crack_control(self, action: str) -> None:
+        if self.query_one(TabbedContent).active != "tab-crack":
+            return
+        picked = self.query_one("#pane-crack", CrackPane).selected()
+        if picked is None:
+            return
+        tid, _status = picked
+        try:
+            self.notify(f"task {tid}: {crack.request(self.case, tid, action)}")
+        except ValueError as exc:
+            self.notify(str(exc), severity="warning")
+            return
+        if action == "resume":
+            jobs.enqueue(self.case, "hashcat")
+        self.query_one("#pane-crack", CrackPane).refresh_data(self.case)
+
+    def action_crack_toggle(self) -> None:
+        if self.query_one(TabbedContent).active != "tab-crack":
+            return
+        picked = self.query_one("#pane-crack", CrackPane).selected()
+        if picked:
+            self._crack_control("resume" if picked[1] == "paused" else "pause")
+
+    def action_crack_plan(self) -> None:
+        self.query_one(TabbedContent).active = "tab-crack"
+        problem = crack.check_ready()
+        if problem:
+            self.notify(problem, severity="warning")
+            return
+        ids, warnings = crack.plan_tasks(self.case, Profile())
+        for w in warnings:
+            self.notify(w, severity="warning")
+        if not ids:
+            self.notify("nothing new to queue (no uncracked hashes, or already planned)")
+            return
+        jobs.enqueue(self.case, "hashcat")
+        self.notify(f"queued {len(ids)} crack tasks (-w 2, default list then digit masks)")
 
     def action_export(self) -> None:
         jid = jobs.enqueue(self.case, "report")
@@ -201,9 +261,9 @@ class TextolitApp(App[None]):
                 "no image ingested; run `textolit init <case> --image FILE`", severity="warning"
             )
             return
-        for module in ("unpack", "entropy", "fswalk", "binintel", "netmap"):
+        for module in ("unpack", "entropy", "fswalk", "binintel", "netmap", "crypto", "websurface"):
             jobs.enqueue(self.case, module)
-        self.notify("queued unpack, entropy, fswalk, binintel, netmap (rule sweep follows)")
+        self.notify("queued the analysis pipeline (rule sweep follows). Cracking is separate: g")
 
     async def action_quit(self) -> None:
         busy = jobs.running_count(self.case)
