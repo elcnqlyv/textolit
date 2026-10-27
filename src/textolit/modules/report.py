@@ -8,7 +8,8 @@ from typing import Any
 from textolit.core.case import Case, utcnow
 from textolit.core.ledger import add_artifact
 from textolit.modules.base import ModuleResult, ProgressFn, no_progress
-from textolit.modules.netmap import PASS_RE
+from textolit.redact import mask as _mask
+from textolit.redact import mask_snippet as _mask_snippet
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
@@ -32,17 +33,6 @@ OWASP_IOT = {
     "I10": "Lack of Physical Hardening",
 }
 CONF_ORDER = {"high": 0, "med": 1, "low": 2}
-
-
-def _mask(secret: str | None) -> str:
-    if not secret:
-        return ""
-    return secret[:2] + "*" * max(len(secret) - 2, 2)
-
-
-def _mask_snippet(text: str) -> str:
-    """Mask password-looking values so the report can be shared without leaking them."""
-    return PASS_RE.sub(lambda m: m.group(0).replace(m.group(1), _mask(m.group(1))), text)
 
 
 def _scalar(conn: Any, sql: str) -> int:
