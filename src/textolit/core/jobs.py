@@ -24,7 +24,7 @@ POLL_SECONDS = 0.25
 # cannot block the job that produced the new evidence.
 SWEEP_AFTER = frozenset({"fswalk", "binintel", "netmap", "crypto", "websurface"})
 # Long GPU jobs get their own worker so analysis jobs never queue behind a crack.
-LONG_MODULES = frozenset({"hashcat"})
+LONG_MODULES = frozenset({"hashcat", "llm"})
 
 
 @dataclass(frozen=True)
