@@ -281,7 +281,76 @@ def _appendix_section(conn: Any) -> list[str]:
     return out
 
 
-def render_markdown(case: Case) -> str:
+def _llm_section(case: Case) -> list[str]:
+    root = case.root / "artifacts/llm"
+    docs: dict[str, Any] = {}
+    for task in ("triage", "crypto", "draft"):
+        f = root / f"{task}-latest.json"
+        if f.is_file():
+            try:
+                docs[task] = json.loads(f.read_text("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+    out = ["## LLM-assisted notes (unverified draft)", ""]
+    if not docs:
+        return out + ["_No validated LLM output in this case._", ""]
+    out += [
+        "> **Unverified.** These notes were drafted by a language model from the evidence listed"
+        " in this report. Each statement cites evidence ids (F findings, E evidence links,"
+        " M crypto items, W web rows). Replies are checked for valid citations, but an analyst"
+        " must confirm every statement.",
+        "",
+    ]
+    if "triage" in docs:
+        d = docs["triage"]["data"]
+        out += [
+            f"### Triage (call {docs['triage']['call_id']}, {docs['triage']['model']})",
+            "",
+            d["summary"],
+            "",
+        ]
+        out += [
+            f"- {p['finding']}: {p['reason']} [{', '.join(p['cites'])}]" for p in d["priorities"]
+        ]
+        out += [f"- unverified: {u}" for u in d["unverified"]] + [""]
+    if "crypto" in docs:
+        d = docs["crypto"]["data"]
+        out += [f"### Crypto notes (call {docs['crypto']['call_id']})", ""]
+        for a in d["assessments"]:
+            step = f" Next: {a['suggested_attack']}" if a.get("suggested_attack") else ""
+            out.append(f"- {a['material']}: {a['assessment']}{step} [{', '.join(a['cites'])}]")
+        out += [f"- unverified: {u}" for u in d["unverified"]] + [""]
+    if "draft" in docs:
+        d = docs["draft"]["data"]
+        out += [f"### Narrative draft (call {docs['draft']['call_id']})", ""]
+        if d.get("executive_summary"):
+            es = d["executive_summary"]
+            out += [f"{es['text']} [{', '.join(es['cites'])}]", ""]
+        for sec in d.get("sections", []):
+            out += [f"**{sec['title']}.** {sec['body']} [{', '.join(sec['cites'])}]", ""]
+        out += [f"- unverified: {u}" for u in d.get("unverified", [])] + [""]
+    calls = case.conn.execute("SELECT * FROM llm_calls ORDER BY id").fetchall()
+    out += ["### LLM call log", ""]
+    out.append(
+        _table(
+            ["id", "template", "model", "tokens in/out", "status", "prompt sha256"],
+            [
+                [
+                    c["id"],
+                    c["template"],
+                    c["model"],
+                    f"{c['tokens_in']}/{c['tokens_out']}",
+                    c["status"],
+                    c["prompt_sha256"][:16],
+                ]
+                for c in calls
+            ],
+        )
+    )
+    return out
+
+
+def render_markdown(case: Case, include_llm: bool = False) -> str:
     c = case.conn
     name = c.execute("SELECT name FROM cases WHERE id=?", (case.case_id,)).fetchone()[0]
     pending = _scalar(c, "SELECT count(*) FROM findings WHERE status='pending'")
@@ -427,6 +496,8 @@ def render_markdown(case: Case) -> str:
     out += _crypto_section(c)
     out += _findings_section(c)
 
+    if include_llm:
+        out += _llm_section(case)
     out += _appendix_section(c)
     out += ["## Command log (appendix)", ""]
     cmds = c.execute("SELECT * FROM commands ORDER BY id").fetchall()
@@ -467,7 +538,7 @@ class Report:
             )
         statuses = ("accepted", "pending") if options.get("include_pending") else ("accepted",)
 
-        text = render_markdown(case)
+        text = render_markdown(case, bool(options.get("include_llm")))
         case.reports_dir.mkdir(parents=True, exist_ok=True)
         stamp = utcnow().replace(":", "").replace("-", "")[:15]
         written: list[str] = []

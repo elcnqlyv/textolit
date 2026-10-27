@@ -197,3 +197,33 @@ def test_report_unknown_format_and_empty_cve_warning(tmp_path: Path) -> None:
     assert not Report().run(case, formats=["rtf"]).ok
     res = Report().run(case, formats=["json"])
     assert res.ok and any("no entries" in w for w in res.warnings)
+
+
+def test_report_includes_llm_notes_only_when_asked(tmp_path: Path) -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from llm_server import FakeLlm
+
+    from textolit.llm_backends import LlmConfig, save_config
+    from textolit.modules.llm import Llm
+
+    case = _case_with_accepted(tmp_path)
+    with FakeLlm() as srv:
+        srv.reply = json.dumps(
+            {
+                "summary": "Root has no password.",
+                "priorities": [{"finding": "F1", "reason": "empty field", "cites": ["F1", "E1"]}],
+                "unverified": ["telnet may be on"],
+            }
+        )
+        save_config(case, LlmConfig(model="m", base_url=srv.url))
+        case.set_llm(True)
+        assert Llm().run(case, task="triage").ok
+    plain = (case.root / Report().run(case).data["path"]).read_text()
+    assert "LLM-assisted notes" not in plain and "Root has no password." not in plain
+    full = (case.root / Report().run(case, include_llm=True).data["path"]).read_text()
+    assert "## LLM-assisted notes (unverified draft)" in full and "**Unverified.**" in full
+    assert "- F1: empty field [F1, E1]" in full and "unverified: telnet may be on" in full
+    assert "triage.txt" in full  # call log with prompt hash
