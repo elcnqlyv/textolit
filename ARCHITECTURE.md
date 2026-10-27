@@ -66,6 +66,20 @@ database and case directory.
 upload handlers, front-end credentials) and raises findings for upload handlers, browser-side
 login logic and embedded credentials.
 
+## Exports and LLM (sprint 4)
+
+- `modules/report.py` builds the Markdown report from the ledger. `export_docs.py` turns that
+  Markdown into DOCX and PDF. `export_cve.py` builds the CVE-ready JSON from findings, and
+  `cvss.py` holds the CVSS 3.1 calculator and the suggested vectors.
+- LLM use is split so each piece can be checked alone. `llm_context.py` builds the prompt data
+  and the set of ids a reply may cite. `llm_backends.py` talks to Ollama or an OpenAI-style
+  API. `llm_validate.py` checks the reply against the schema and the ids. `modules/llm.py`
+  gates on the per-case toggle, logs the call and stores the products.
+- The model never writes to `findings`. Its output lives in `artifacts/llm/` and in labeled
+  report sections, and the CVE export marks it as an unverified draft.
+- Firmware text is attacker-controlled. It reaches the model only as JSON string values inside
+  a block the rules call untrusted, and the validator drops claims that do not cite real ids.
+
 ## Where future modules plug in
 
 A new module is a class with `name` and `run`, listed in `registry.py`; it gets a CLI

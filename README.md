@@ -57,11 +57,12 @@ One command-line tool and one terminal workbench turn a vendor firmware download
 - **Cracking**: a hashcat queue tuned for a GTX1650 that you can pause and resume
 - **Web surface**: a static map of the web interface, its server, login style, upload handlers and visible credentials
 - **Missed-findings sweep**: YAML rule packs that turn every odd thing into a lead with a confidence and an evidence path
-- **Report**: Markdown grouped by the OWASP IoT Top 10
+- **Report**: Markdown, DOCX, PDF and CVE-ready JSON, grouped by the OWASP IoT Top 10, with a summary rollup and an evidence appendix
+- **LLM assist**: optional and off by default. Triage notes, crypto reasoning, report drafts and CVE write-ups with every claim tied to evidence ids
 
 Every command goes through one subprocess wrapper. It records the argv, the working directory, the exit code and the hashes of stdout and stderr in the case database. The TUI and the CLI share the same job queue, so both leave the same trail.
 
-Textolit needs Python 3.11 or newer. It depends on `textual` and `pyyaml`. It calls external tools when they are present: `binwalk`, `unsquashfs` or `sasquatch`, and `file`. `hashcat` is optional and only needed to run the crack queue. `radare2` is planned for a later module.
+Textolit needs Python 3.11 or newer. It depends on `textual` and `pyyaml`. The `report` extra adds `python-docx` and `reportlab` for DOCX and PDF export. Markdown and JSON need nothing extra. It calls external tools when they are present: `binwalk`, `unsquashfs` or `sasquatch`, and `file`. `hashcat` is optional and only needed to run the crack queue. `radare2` is planned for a later module.
 
 > [!WARNING]
 > **Authorized testing only.** Textolit reads firmware you are allowed to analyze. It does not emulate, exploit or touch a live device. It stays air-gapped by default. The LLM toggle is off per case until you turn it on and confirm.
@@ -71,7 +72,7 @@ Textolit needs Python 3.11 or newer. It depends on `textual` and `pyyaml`. It ca
 ```bash
 git clone https://github.com/elcnqlyv/textolit.git
 cd textolit
-pipx install .
+pipx install '.[report]'
 textolit --version
 ```
 
@@ -122,7 +123,7 @@ options:
   --version             show program's version number and exit
 ```
 
-Every module takes the case directory as its first argument, so the same commands work in scripts. The `llm` module is a stub for now and reports that it is not implemented.
+Every module takes the case directory as its first argument, so the same commands work in scripts. The `llm` command has its own actions, described below.
 
 ## Workflow
 
@@ -176,8 +177,8 @@ textolit websurface ./case-foo
 textolit findings ./case-foo
 textolit decide ./case-foo 4 reject --note "lab placeholder"
 
-# 6. write the report
-textolit report ./case-foo
+# 6. write the report: md by default, or docx, pdf, json (CVE-ready), all
+textolit report ./case-foo --format all
 ```
 
 Extraction runs under `umask 0`. File modes in the index are the image's modes, so a world-writable file stays visible.
@@ -206,13 +207,46 @@ textolit crack ./case-foo resume 3     # continues from the checkpoint
 
 Memory-hard modes such as scrypt only get the default list and a warning. A cracked password becomes a high-confidence finding with the source file and line of the hash. The queue lives in SQLite, so a killed session leaves tasks `paused` and nothing restarts until you resume it. Pass `--hashcat /path/to/hashcat` to use another binary.
 
+## Reports and exports
+
+```bash
+textolit report ./case-foo                          # Markdown
+textolit report ./case-foo --format pdf --format docx
+textolit report ./case-foo --format json            # CVE-ready JSON
+textolit report ./case-foo --format all --include-pending --include-llm
+```
+
+The Markdown report opens with a summary rollup (severity by confidence, OWASP IoT category counts, decisions). It ends with an evidence appendix that lists artifacts with their hashes. DOCX and PDF render the same Markdown, so the formats never drift. Secrets are masked in every format.
+
+The CVE JSON has one entry per accepted finding. Use `--include-pending` to add pending ones. Each entry carries the CWE with its name, a suggested CVSS 3.1 vector with the computed score, the OWASP IoT category, the firmware hashes, the evidence with file and line, and an empty slot for the PoC. **The CVSS vector is a suggestion and is marked `confirmed: false`.** Affected versions and references are left for you to fill in, because the firmware cannot tell Textolit what the vendor calls its releases.
+
+## LLM assistance
+
+The LLM is off for every case until you turn it on. It is never needed. Nothing else in Textolit calls a model.
+
+```bash
+textolit llm ./case-foo config --backend ollama --model <your-model>
+textolit llm ./case-foo on
+textolit llm ./case-foo triage             # rank the leads
+textolit llm ./case-foo crypto             # reason about hashes and certificates
+textolit llm ./case-foo draft              # report narrative, written to reports/
+textolit llm ./case-foo cve 4              # write-up draft for finding 4
+textolit llm ./case-foo calls              # the call log
+```
+
+Two backends exist: Ollama on this machine, and any OpenAI-compatible API. The API key comes from an environment variable (`TEXTOLIT_LLM_API_KEY` by default) and is never written to the case. A backend on a non-local address is refused until you run `config --allow-remote`, because case evidence would leave the machine. The TUI shows `LLM ACTIVE` in the status bar whenever it is on, and `F5` asks for confirmation first.
+
+The prompt templates live in `src/textolit/prompt_templates/`. They tell the model to treat firmware content as untrusted data, to cite evidence ids for every claim, to put anything unproven in an `unverified` list, and to answer with one JSON object. Textolit then checks the reply. A claim with no valid citation is dropped. A claim that names a CVE id absent from the evidence is dropped. A reply with nothing left is stored as `invalid` and not used. The CWE in a write-up is always the finding's own. Hash values and cracked passwords are never sent. Snippets are masked.
+
+Every call is recorded in `llm_calls` with the backend, model, prompt hash and token counts. The exact prompt and raw reply stay in `artifacts/llm/`. A model reply never creates a finding. It stays a labeled draft until you accept it. `report --include-llm` adds the validated notes under an "unverified" banner.
+
 ## Workbench (TUI)
 
 ```bash
 textolit tui ./case-foo
 ```
 
-The workbench opens on the signature banner, then the dashboard. Tabs cover Dashboard, Entropy, Artifacts, Netmap, Web, Crypto, Crack, Findings, Jobs and Commands. Cracking runs on its own worker, so analysis jobs never wait behind it. A job footer shows progress for queued and running jobs. State lives in SQLite, so a killed session resumes where it stopped. Jobs that were running when the process died show as `interrupted` and do not restart on their own.
+The workbench opens on the signature banner, then the dashboard. Tabs cover Dashboard, Entropy, Artifacts, Netmap, Web, Crypto, Crack, LLM, Findings, Jobs and Commands. Cracking runs on its own worker, so analysis jobs never wait behind it. A job footer shows progress for queued and running jobs. State lives in SQLite, so a killed session resumes where it stopped. Jobs that were running when the process died show as `interrupted` and do not restart on their own.
 
 | Key | Action |
 | --- | --- |
@@ -221,10 +255,12 @@ The workbench opens on the signature banner, then the dashboard. Tabs cover Dash
 | `F3` | Cycle the findings filter |
 | `F4` | Job queue |
 | `F5` | LLM on or off, with a confirm step. The status bar shows `LLM ACTIVE` when on |
-| `F6` | Export the Markdown report |
+| `F6` | Export the report as Markdown, DOCX, PDF and CVE JSON |
 | `F10` | Quit, with a guard while jobs are running |
 | `p` | Queue the full pipeline |
 | `a` `x` `s` | Accept, reject or snooze the selected finding |
+| `t` `c` `d` | LLM triage, crypto reasoning and report draft (LLM tab, needs the LLM on) |
+| `v` | LLM write-up draft for the selected finding (Findings tab) |
 | `g` | Plan and run hashcat attacks. On the Crack tab `space` pauses or resumes and `x` cancels |
 
 ## Rule packs
