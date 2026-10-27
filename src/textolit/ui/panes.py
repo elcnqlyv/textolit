@@ -143,20 +143,31 @@ class FindingsPane(Vertical):
 
     def on_mount(self) -> None:
         self.query_one("#findings", DataTable).add_columns(
-            "id", "conf", "status", "title", "evidence"
+            "id", "conf", "severity", "status", "title", "evidence"
         )
+
+    def selected_id(self) -> int | None:
+        table = self.query_one("#findings", DataTable)
+        if table.row_count == 0:
+            return None
+        return int(table.get_row_at(table.cursor_row)[0])
 
     def cycle_filter(self) -> str:
         self.filter = self.FILTERS[(self.FILTERS.index(self.filter) + 1) % len(self.FILTERS)]
         return self.filter
 
     def refresh_data(self, case: Case) -> None:
-        q = "SELECT id, confidence, status, title, evidence_path FROM findings"
+        q = (
+            "SELECT id, confidence, severity, status, title,"
+            " evidence_path || coalesce(':' || (SELECT line FROM evidence_links"
+            " WHERE finding_id=findings.id LIMIT 1), '') FROM findings"
+        )
         args: tuple[str, ...] = ()
         if self.filter != "all":
             q += " WHERE status=?"
             args = (self.filter,)
-        rows = case.conn.execute(q + " ORDER BY id", args).fetchall()
+        order = " ORDER BY CASE confidence WHEN 'high' THEN 0 WHEN 'med' THEN 1 ELSE 2 END, id"
+        rows = case.conn.execute(q + order, args).fetchall()
         pending = case.conn.execute("SELECT count(*) FROM findings WHERE status='pending'")
         head = f"{pending.fetchone()[0]} leads pending review   filter: {self.filter}  (F3)"
         self.query_one("#findings-head", Static).update(head)
@@ -202,3 +213,37 @@ class JobsPane(Vertical):
             for j in jobs.list_jobs(case)
         ]
         sync_table(self.query_one("#jobs", DataTable), rows)
+
+
+class NetMapPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static("Listen-by-default (source file and line for every row)", classes="heading")
+        yield DataTable(id="netmap", cursor_type="row")
+
+    def on_mount(self) -> None:
+        self.query_one("#netmap", DataTable).add_columns(
+            "port", "service", "kind", "non-std", "default", "source", "evidence"
+        )
+
+    def refresh_data(self, case: Case) -> None:
+        rows = case.conn.execute(
+            "SELECT e.port, e.proto, s.name, e.nonstandard, e.default_on, e.source_path,"
+            " e.source_line, e.evidence FROM network_endpoints e"
+            " LEFT JOIN services s ON s.id=e.service_id"
+            " ORDER BY e.default_on DESC, e.nonstandard DESC, e.port"
+        ).fetchall()
+        sync_table(
+            self.query_one("#netmap", DataTable),
+            [
+                (
+                    f"{r['port']}/{r['proto']}",
+                    r["name"],
+                    "-",
+                    "NON-STD" if r["nonstandard"] else "",
+                    "on" if r["default_on"] else "off",
+                    f"{r['source_path']}:{r['source_line']}",
+                    r["evidence"][:80],
+                )
+                for r in rows
+            ],
+        )

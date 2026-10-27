@@ -106,3 +106,37 @@ async def _keys_flow(tmp_path: Path) -> None:
         await pilot.pause()
         assert isinstance(app.screen, ConfirmScreen)
         await pilot.press("escape")
+
+
+def test_findings_decisions_and_netmap(tmp_path: Path) -> None:
+    asyncio.run(_review_flow(tmp_path))
+
+
+async def _review_flow(tmp_path: Path) -> None:
+    from textual.widgets import DataTable
+
+    from textolit.core.ledger import add_artifact, add_finding, ensure_heuristic
+    from textolit.modules.fswalk import FsWalk
+    from textolit.modules.netmap import NetMap
+
+    case = Case.create(tmp_path / "c")
+    root = case.extract_dir / "image1" / "squashfs-root"
+    (root / "etc/init.d").mkdir(parents=True)
+    (root / "etc/init.d/rcS").write_text("telnetd -p 23456 &\n")
+    add_artifact(case, "fs_root:squashfs", root, hash_it=False)
+    FsWalk().run(case)
+    NetMap().run(case)
+    ensure_heuristic(case, "x", "t", "t", "info")
+    add_finding(case, heuristic_id="x", title="lead", evidence_path="a/b", confidence="low")
+    app = TextolitApp(case, splash=False, worker=False)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#netmap", DataTable).row_count >= 1
+        app.query_one("TabbedContent").active = "tab-findings"
+        await pilot.pause()
+        assert app.query_one("#findings", DataTable).row_count >= 1
+        app.query_one("#findings", DataTable).focus()
+        await pilot.press("x")
+        await pilot.pause()
+        statuses = {r[0] for r in case.conn.execute("SELECT status FROM findings")}
+        assert "rejected" in statuses

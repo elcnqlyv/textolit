@@ -13,6 +13,7 @@ from textual.widgets import DataTable, Footer, RichLog, Static, TabbedContent, T
 
 from textolit.core import jobs
 from textolit.core.case import Case
+from textolit.core.ledger import decide
 from textolit.ui.panes import (
     ArtifactsPane,
     CommandsPane,
@@ -20,6 +21,7 @@ from textolit.ui.panes import (
     EntropyPane,
     FindingsPane,
     JobsPane,
+    NetMapPane,
 )
 from textolit.ui.screens.modals import ConfirmScreen, HelpScreen
 from textolit.ui.screens.splash import SplashScreen
@@ -56,6 +58,9 @@ class TextolitApp(App[None]):
         Binding("f10", "quit", "Quit"),
         Binding("ctrl+q", "quit", "Quit", show=False),
         Binding("p", "pipeline", "Run", show=True),
+        Binding("a", "decide('accepted')", "Accept"),
+        Binding("x", "decide('rejected')", "Reject"),
+        Binding("s", "decide('snoozed')", "Snooze"),
     ]
 
     def __init__(self, case: Case, *, splash: bool = True, worker: bool = True) -> None:
@@ -75,6 +80,8 @@ class TextolitApp(App[None]):
                 yield EntropyPane(id="pane-entropy")
             with TabPane("Artifacts", id="tab-artifacts"):
                 yield ArtifactsPane(id="pane-artifacts")
+            with TabPane("Netmap", id="tab-netmap"):
+                yield NetMapPane(id="pane-netmap")
             with TabPane("Findings", id="tab-findings"):
                 yield FindingsPane(id="pane-findings")
             with TabPane("Jobs", id="tab-jobs"):
@@ -109,6 +116,7 @@ class TextolitApp(App[None]):
         self.query_one("#pane-dashboard", DashboardPane).refresh_data(self.case)
         self.query_one("#pane-entropy", EntropyPane).refresh_data(self.case)
         self.query_one("#pane-artifacts", ArtifactsPane).refresh_data(self.case)
+        self.query_one("#pane-netmap", NetMapPane).refresh_data(self.case)
         self.query_one("#pane-findings", FindingsPane).refresh_data(self.case)
         self.query_one("#pane-jobs", JobsPane).refresh_data(self.case)
         self.query_one("#pane-commands", CommandsPane).refresh_data(self.case)
@@ -172,6 +180,17 @@ class TextolitApp(App[None]):
 
         self.push_screen(ConfirmScreen(question), decide)
 
+    def action_decide(self, status: str) -> None:
+        if self.query_one(TabbedContent).active != "tab-findings":
+            return
+        pane = self.query_one("#pane-findings", FindingsPane)
+        fid = pane.selected_id()
+        if fid is None:
+            return
+        decide(self.case, fid, status)
+        pane.refresh_data(self.case)
+        self.notify(f"finding {fid}: {status}")
+
     def action_export(self) -> None:
         jid = jobs.enqueue(self.case, "report")
         self.notify(f"queued report export (job {jid})")
@@ -182,9 +201,9 @@ class TextolitApp(App[None]):
                 "no image ingested; run `textolit init <case> --image FILE`", severity="warning"
             )
             return
-        jobs.enqueue(self.case, "unpack")
-        jobs.enqueue(self.case, "entropy")
-        self.notify("queued unpack + entropy")
+        for module in ("unpack", "entropy", "fswalk", "binintel", "netmap"):
+            jobs.enqueue(self.case, module)
+        self.notify("queued unpack, entropy, fswalk, binintel, netmap (rule sweep follows)")
 
     async def action_quit(self) -> None:
         busy = jobs.running_count(self.case)
