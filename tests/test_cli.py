@@ -85,3 +85,26 @@ def test_cli_crack_flow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert "cracked" in status and "m0 default IoT passwords" in status
     assert main(["crack", str(case_dir), "pause"]) == 2  # needs an id
     assert main(["crack", str(case_dir), "run", "--hashcat", "/no/such/hashcat"]) == 2
+
+
+def test_cli_crypto_and_websurface(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from textolit.core.case import Case
+    from textolit.core.ledger import add_artifact
+
+    case_dir = tmp_path / "case"
+    case = Case.create(case_dir)
+    root = case.extract_dir / "image1" / "squashfs-root"
+    (root / "etc").mkdir(parents=True)
+    (root / "www").mkdir()
+    (root / "etc/shadow").write_text("root:$1$abcdefgh$" + "a" * 22 + ":0:0:::\n")
+    (root / "www/index.html").write_text(
+        '<form action="/cgi-bin/x.cgi"><input type="password"></form>'
+    )
+    add_artifact(case, "fs_root:squashfs", root, hash_it=False)
+    case.close()
+    assert main(["fswalk", str(case_dir)]) == 0
+    assert main(["crypto", str(case_dir)]) == 0
+    out = capsys.readouterr().out
+    assert "md5crypt" in out and "500" in out and "textolit crack" in out
+    assert main(["websurface", str(case_dir)]) == 0
+    assert "1 web roots" in capsys.readouterr().out

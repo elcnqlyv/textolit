@@ -315,8 +315,23 @@ class Crypto:
             f"{stats['hashes']} hashes {by_algo or ''}, {stats['certs']} certificates, "
             f"{stats['keys']} private keys, {stats['key_strings']} key strings"
         )
+        listing = [
+            {
+                "user": r["username"],
+                "algo": r["algo"],
+                "mode": r["hashcat_mode"],
+                "source": f"{r['source_path']}:{r['source_line']}",
+            }
+            for r in case.conn.execute(
+                "SELECT * FROM crypto_materials WHERE kind='hash' ORDER BY id"
+            )
+        ]
         return ModuleResult(
-            self.name, True, summary, data={**stats, "by_algo": by_algo}, warnings=warnings[:20]
+            self.name,
+            True,
+            summary,
+            data={**stats, "by_algo": by_algo, "hash_list": listing},
+            warnings=warnings[:20],
         )
 
     def _cert(

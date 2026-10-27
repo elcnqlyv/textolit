@@ -114,12 +114,25 @@ def _print_netmap(result: ModuleResult) -> None:
         )
 
 
+def _print_crypto(result: ModuleResult) -> None:
+    hashes = result.data.get("hash_list", [])
+    if not hashes:
+        return
+    print(f"  {'user':<12}{'algo':<13}{'hashcat -m':<12}source")
+    for h in hashes:
+        mode = h["mode"] if h["mode"] is not None else "none"
+        print(f"  {(h['user'] or '-'):<12}{h['algo']:<13}{mode!s:<12}{h['source']}")
+    print("  next: textolit crack <case> plan   (queues attacks, prints the hashcat commands)")
+
+
 def run_module(case: Case, module: str, as_json: bool, **options: Any) -> int:
     job_id = jobs.enqueue(case, module, **options)
     result = jobs.run_job(case, job_id)
     _print_result(result, as_json)
     if module == "netmap" and result.ok and not as_json:
         _print_netmap(result)
+    if module == "crypto" and result.ok and not as_json:
+        _print_crypto(result)
     ok = result.ok
     # follow-up jobs queued by this one (e.g. the rule sweep) run now, so the CLI never
     # leaves evidence unexamined.
