@@ -1,8 +1,8 @@
 """entropy: sliding-window Shannon entropy with a compressed/encrypted/plain classifier.
 
-The compressed-vs-encrypted split is a heuristic: both look near-uniform. A window run
-is called ``compressed`` when a known compression magic appears at its start, and
-``encrypted`` only when no such magic is present and the byte histogram is uniform.
+The compressed-vs-encrypted split is a heuristic: both look near-uniform. A high-entropy
+run is ``compressed`` once a known compression magic has been seen, and ``encrypted`` only
+for windows before any magic whose byte histogram is uniform.
 Treat ``encrypted`` as a lead, not a verdict.
 """
 
@@ -67,10 +67,13 @@ def classify_window(data: bytes) -> str:
     return "highent"
 
 
-def _resolve_high(first_bytes: bytes, chi: float) -> str:
-    if any(m in first_bytes for m in COMPRESSION_MAGICS):
-        return "compressed"
-    return "encrypted" if CHI2_LOW <= chi <= CHI2_HIGH else "compressed"
+SHORT_MAGICS = tuple(m for m in COMPRESSION_MAGICS if len(m) <= 3)
+LONG_MAGICS = tuple(m for m in COMPRESSION_MAGICS if len(m) > 3)
+
+
+def has_compression_magic(block: bytes) -> bool:
+    """Long magics anywhere in the window; 3-byte ones only at its start (chance matches)."""
+    return block.startswith(SHORT_MAGICS) or any(m in block for m in LONG_MAGICS)
 
 
 @dataclass(frozen=True)
@@ -84,35 +87,47 @@ class Region:
 def scan_file(
     path: Path, window: int = DEFAULT_WINDOW, progress: ProgressFn = no_progress
 ) -> list[Region]:
-    """Scan ``path`` and return merged regions."""
+    """Scan ``path`` window by window and merge neighbours with the same class.
+
+    High-entropy windows are split by state: once a compression magic is seen, following
+    high-entropy windows stay ``compressed`` until a plain or empty window ends the run.
+    Before any magic, a window is ``encrypted`` when its byte histogram is uniform.
+    """
     size = path.stat().st_size
-    windows: list[tuple[int, int, float, str, float, bytes]] = []
+    wins: list[tuple[int, int, float, str]] = []
+    in_compressed = False
     with path.open("rb") as fh:
         offset = 0
         while block := fh.read(window):
             h = shannon(block)
             cls = classify_window(block)
-            chi = chi_square(block) if cls == "highent" and len(block) >= window else -1.0
-            windows.append((offset, len(block), h, cls, chi, block[:512]))
+            if cls != "highent":
+                in_compressed = False
+            else:
+                if has_compression_magic(block):
+                    in_compressed = True
+                if in_compressed:
+                    cls = "compressed"
+                elif len(block) < window and wins:
+                    cls = wins[-1][3]  # a short tail cannot be tested; inherit the neighbour
+                else:
+                    cls = (
+                        "encrypted" if CHI2_LOW <= chi_square(block) <= CHI2_HIGH else "compressed"
+                    )
+            wins.append((offset, len(block), h, cls))
             offset += len(block)
             progress(offset / max(size, 1), f"entropy {offset >> 20} MiB")
 
     regions: list[Region] = []
     i = 0
-    while i < len(windows):
+    while i < len(wins):
         j = i
-        group_cls = windows[i][3]
-        while j + 1 < len(windows) and windows[j + 1][3] == group_cls:
+        while j + 1 < len(wins) and wins[j + 1][3] == wins[i][3]:
             j += 1
-        group = windows[i : j + 1]
+        group = wins[i : j + 1]
         length = sum(w[1] for w in group)
         mean_h = sum(w[2] * w[1] for w in group) / length
-        if group_cls == "highent":
-            chis = [w[4] for w in group if w[4] >= 0]
-            chi = sum(chis) / len(chis) if chis else -1.0
-            # A magic anywhere in the first window of the run marks it compressed.
-            group_cls = _resolve_high(group[0][5], chi)
-        regions.append(Region(group[0][0], length, round(mean_h, 4), group_cls))
+        regions.append(Region(group[0][0], length, round(mean_h, 4), wins[i][3]))
         i = j + 1
     return regions
 

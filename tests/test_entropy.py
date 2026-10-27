@@ -41,3 +41,13 @@ def test_module_persists_regions(tmp_path: Path) -> None:
     ]
     assert classes == ["plain", "encrypted"]
     assert res.warnings
+
+
+def test_random_prefix_then_compressed_run_split(tmp_path: Path) -> None:
+    img = tmp_path / "fw.bin"
+    img.write_bytes(os.urandom(8192) + b"hsqs" + os.urandom(16380))
+    regions = scan_file(img, 4096)
+    assert [(r.offset, r.classification) for r in regions] == [
+        (0, "encrypted"),
+        (8192, "compressed"),
+    ]
