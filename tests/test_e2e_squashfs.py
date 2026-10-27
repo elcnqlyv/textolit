@@ -27,6 +27,8 @@ def build_firmware(tmp: Path) -> Path:
     (root / "www/a.html").write_text("<html>same</html>")
     (root / "www/b.html").write_text("<html>same</html>")
     os.symlink("/etc/passwd", root / "www/pw")
+    (root / "etc/open.conf").write_text("x")
+    (root / "etc/open.conf").chmod(0o666)
     subprocess.run(
         ["mksquashfs", root, tmp / "fs.sqsh", "-quiet", "-noappend"],
         check=True,
@@ -48,6 +50,13 @@ def test_pipeline(tmp_path: Path) -> None:
     extracted = list((case.root / res.data["extract_dir"]).rglob("rcS"))
     assert extracted and "23456" in extracted[0].read_text()
     assert res.data["files"] >= 4 and res.data["unique"] < res.data["files"]  # a.html == b.html
+
+    # modes must survive extraction (umask would strip world-writable bits)
+    from textolit.modules.fswalk import FsWalk
+
+    assert FsWalk().run(case).ok
+    mode = case.conn.execute("SELECT mode FROM files WHERE path='/etc/open.conf'").fetchone()[0]
+    assert mode & 0o002, oct(mode)
 
     ent = Entropy().run(case)
     assert ent.ok

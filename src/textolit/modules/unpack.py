@@ -34,6 +34,9 @@ FS_WORDS = (
     ("cramfs", "cramfs"),
 )
 DEFAULT_TIMEOUT = 900.0
+# Extractors apply the caller's umask, which silently strips world-writable bits and would
+# hide a whole class of findings. Run them under umask 0 so recorded modes are the image's.
+UMASK0 = ["sh", "-c", 'umask 0; exec "$@"', "textolit-umask0"]
 
 
 def parse_signatures(text: str) -> list[dict[str, Any]]:
@@ -94,7 +97,7 @@ def _carve_fallback(case: Case, image: Path, sigs: list[dict[str, Any]], dest: P
         carved.write_bytes(data[sig["offset"] :])
         add_artifact(case, "carved", carved)
         target = dest / f"squashfs-root-{sig['offset']:x}"
-        res = run(case, [tool, "-f", "-d", str(target), str(carved)], module="unpack")
+        res = run(case, [*UMASK0, tool, "-f", "-d", str(target), str(carved)], module="unpack")
         notes.append(f"fallback {Path(tool).name} at 0x{sig['offset']:x}: exit {res.exit_code}")
     return notes
 
@@ -122,7 +125,7 @@ class Unpack:
         progress(0.2, "binwalk recursive extraction")
         ext = run(
             case,
-            ["binwalk", "-e", "-M", "-C", str(dest), str(image)],
+            [*UMASK0, "binwalk", "-e", "-M", "-C", str(dest), str(image)],
             cwd=case.root,
             timeout=timeout,
             module=self.name,
