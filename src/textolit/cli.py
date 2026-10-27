@@ -18,6 +18,9 @@ from textolit.modules.registry import builtin_modules
 
 TAGLINE = "Textolit — firmware triage workbench for CCTV and access-control research."
 
+# Modules with their own hand-written command instead of the generic one.
+CUSTOM_COMMANDS = {"llm"}
+
 # Per-module CLI options: (flag, argparse kwargs, option name passed to the module)
 MODULE_OPTIONS: dict[str, list[tuple[str, dict[str, Any]]]] = {
     "ingest": [
@@ -100,7 +103,29 @@ def build_parser() -> argparse.ArgumentParser:
     ck.add_argument("--temp-abort", type=int, default=85, help="abort at this GPU temp (C)")
     ck.add_argument("--hashcat", default="hashcat", help="hashcat binary")
 
+    lm = sub.add_parser("llm", help="LLM assistance (off by default): configure, toggle, run tasks")
+    lm.add_argument("case", type=Path)
+    lm.add_argument(
+        "action",
+        choices=["status", "config", "on", "off", "triage", "crypto", "draft", "cve", "calls"],
+    )
+    lm.add_argument("finding_id", type=int, nargs="?", help="finding id for the cve task")
+    lm.add_argument("--backend", choices=["ollama", "openai"])
+    lm.add_argument("--model")
+    lm.add_argument("--base-url", dest="base_url")
+    lm.add_argument("--api-key-env", dest="api_key_env", help="env var that holds the API key")
+    lm.add_argument(
+        "--allow-remote",
+        dest="allow_remote",
+        action="store_true",
+        default=None,
+        help="permit a non-local backend (case data leaves this machine)",
+    )
+    lm.add_argument("--timeout", type=float)
+
     for name in builtin_modules():
+        if name in CUSTOM_COMMANDS:
+            continue
         p = sub.add_parser(name, help=f"run the {name} module")
         p.add_argument("case", type=Path)
         p.add_argument("--json", action="store_true", help="machine-readable output")
@@ -159,6 +184,56 @@ def run_module(case: Case, module: str, as_json: bool, **options: Any) -> int:
         _print_result(follow, as_json)
         ok = ok and follow.ok
     return 0 if ok else 1
+
+
+def llm_command(case: Case, args: argparse.Namespace) -> int:
+    from textolit.llm_backends import BackendError, is_loopback, load_config, problems, save_config
+
+    try:
+        cfg = load_config(case)
+    except BackendError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    action = args.action
+    if action == "config":
+        for key in ("backend", "model", "base_url", "api_key_env", "allow_remote", "timeout"):
+            val = getattr(args, key, None)
+            if val is not None:
+                setattr(cfg, key, val)
+        save_config(case, cfg)
+    if action in ("status", "config"):
+        where = "local" if is_loopback(cfg.url) else "REMOTE (data leaves this machine)"
+        state = "LLM ACTIVE" if case.llm_enabled else "LLM off"
+        print(
+            f"{state}  backend={cfg.backend} model={cfg.model or '-'} url={cfg.url or '-'} {where}"
+        )
+        print(
+            f"  allow_remote={cfg.allow_remote} api_key_env={cfg.api_key_env} timeout={cfg.timeout}"
+        )
+        issue = problems(cfg)
+        if issue:
+            print(f"  not usable yet: {issue}")
+        return 0
+    if action in ("on", "off"):
+        case.set_llm(action == "on")
+        print("LLM ACTIVE" if action == "on" else "LLM off")
+        if action == "on":
+            where = (
+                "stay on this machine" if is_loopback(cfg.url) else "will be sent to a remote host"
+            )
+            print(f"  evidence excerpts {where}. Every call is logged in llm_calls.")
+            issue = problems(cfg)
+            if issue:
+                print(f"  note: {issue}")
+        return 0
+    if action == "calls":
+        for r in case.conn.execute("SELECT * FROM llm_calls ORDER BY id"):
+            print(
+                f"{r['id']:>4} {r['status']:<8} {r['template']:<12} {r['model']:<20} "
+                f"in={r['tokens_in']} out={r['tokens_out']} {r['prompt_sha256'][:12]}"
+            )
+        return 0
+    return run_module(case, "llm", False, task=action, finding=args.finding_id)
 
 
 def crack_command(case: Case, args: argparse.Namespace) -> int:
@@ -256,6 +331,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         case = Case.open(args.case)
         jobs.mark_interrupted(case)
+        if args.command == "llm":
+            return llm_command(case, args)
         if args.command == "crack":
             return crack_command(case, args)
         if args.command == "findings":

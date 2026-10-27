@@ -121,3 +121,52 @@ def test_cli_report_formats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     with pytest.raises(SystemExit) as exc:
         main(["report", str(case), "--format", "rtf"])
     assert exc.value.code == 2
+
+
+def test_cli_llm_flow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from llm_server import FakeLlm
+
+    from textolit.core.case import Case
+    from textolit.core.ledger import add_finding, ensure_heuristic
+
+    case_dir = tmp_path / "case"
+    case = Case.create(case_dir)
+    ensure_heuristic(case, "x.a", "t", "t", "high")
+    add_finding(
+        case,
+        heuristic_id="x.a",
+        title="lead",
+        evidence_path="p",
+        line=1,
+        snippet="s",
+        confidence="high",
+        severity="high",
+        owasp_iot="I1",
+    )
+    case.close()
+
+    assert main(["llm", str(case_dir), "status"]) == 0
+    assert "LLM off" in capsys.readouterr().out
+    assert main(["llm", str(case_dir), "triage"]) == 1  # off: refused, not silent
+    with FakeLlm() as srv:
+        srv.reply = json.dumps(
+            {
+                "summary": "s",
+                "priorities": [{"finding": "F1", "reason": "r", "cites": ["F1", "E1"]}],
+                "unverified": [],
+            }
+        )
+        assert main(["llm", str(case_dir), "config", "--model", "m", "--base-url", srv.url]) == 0
+        assert main(["llm", str(case_dir), "on"]) == 0
+        out = capsys.readouterr().out
+        assert "LLM ACTIVE" in out and "stay on this machine" in out
+        assert main(["llm", str(case_dir), "triage"]) == 0
+        assert main(["llm", str(case_dir), "calls"]) == 0
+        assert "ok" in capsys.readouterr().out
+    assert main(["llm", str(case_dir), "off"]) == 0
+    assert main(["llm", str(case_dir), "config", "--base-url", "http://192.0.2.9:1"]) == 0
+    assert "REMOTE" in capsys.readouterr().out
