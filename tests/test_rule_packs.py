@@ -27,9 +27,7 @@ def fixture(tmp: Path) -> Case:
     (r / "etc/init.d/rcS").write_text(
         "#!/bin/sh\ntelnetd -l /bin/sh &\ndropbear -B -p 22 &\n# telnetd old\nkillall telnetd\n"
     )
-    (r / "etc/app.conf").write_text(
-        "user=admin\npassword=letmein\nupdate=8.8.4.4\nlan=10.0.0.1\n"
-    )
+    (r / "etc/app.conf").write_text("user=admin\npassword=letmein\nupdate=8.8.4.4\nlan=10.0.0.1\n")
     (r / "etc/ssl.conf").write_text("ssl_verify = 0\nciphers = RC4-SHA\n")
     (r / "etc/creds.txt").write_text("admin:admin\n")
     (r / "etc/k.pem").write_text("-----BEGIN RSA PRIVATE KEY-----\nabc\n")
