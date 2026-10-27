@@ -1,0 +1,102 @@
+# Credential and authentication leads. Confidence is how sure we are the text is what the
+# rule says, not whether it is exploitable.
+pack: creds
+rules:
+  - id: creds.default-pair
+    title: Well-known default credential pair in plain text
+    kind: content
+    confidence: med
+    severity: high
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)(?<![\w:])(admin:admin|admin:12345|admin:123456|admin:1234|admin:password|admin:888888|admin:admin123|root:root|root:123456|root:12345|root:admin|root:xc3511|root:vizxv|root:xmhdipc|root:juantech|root:hslwificam|root:ikwb|user:user|guest:guest|888888:888888|666666:666666)(?![\w:])'
+    skip_paths: '^/(usr/share/doc|usr/share/man)/'
+    max_per_file: 3
+
+  - id: creds.plaintext-password
+    title: Password assigned in a config or script
+    kind: content
+    confidence: low
+    severity: medium
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)\b(?:pass(?:word|wd)?|pwd)\s*[=:]\s*["'']?(?![$%{<(*?@\[])[^\s"'';<>,]{3,}'
+    globs: ['/etc/*', '/config/*', '/conf/*', '/nvram/*', '/mnt/*', '/param/*', '*.conf', '*.cfg', '*.ini', '*.sh']
+    max_per_file: 5
+
+  - id: creds.empty-password-field
+    title: Account with an empty password field
+    kind: content
+    confidence: high
+    severity: high
+    cwe: CWE-258
+    owasp_iot: I1
+    pattern: '^[A-Za-z_][\w.-]*::'
+    globs: ['*/passwd', '*/shadow', '*/passwd-', '*/shadow-']
+    max_per_file: 5
+
+  - id: creds.private-key
+    title: Private key material shipped in the image
+    kind: content
+    bytes: true
+    confidence: high
+    severity: high
+    cwe: CWE-321
+    owasp_iot: I1
+    pattern: '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----'
+    max_per_file: 1
+
+  - id: creds.basic-auth-hardcoded
+    title: Hard-coded HTTP Basic authorization header
+    kind: content
+    bytes: true
+    confidence: med
+    severity: medium
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)Authorization:\s*Basic\s+[A-Za-z0-9+/=]{8,}'
+    max_per_file: 2
+
+  - id: crypto.md5-crypt-hash
+    title: MD5-crypt ($1$) password hash
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-327
+    owasp_iot: I5
+    pattern: '\$1\$[./0-9A-Za-z]{0,8}\$[./0-9A-Za-z]{22}'
+    globs: ['*/passwd', '*/shadow', '*/passwd-', '*/shadow-', '*.conf', '*.cfg']
+    max_per_file: 5
+
+  - id: crypto.des-crypt-hash
+    title: Legacy DES-crypt password hash
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-916
+    owasp_iot: I5
+    pattern: '^[A-Za-z_][\w.-]*:[./0-9A-Za-z]{13}:'
+    globs: ['*/passwd', '*/shadow', '*/passwd-', '*/shadow-']
+    max_per_file: 5
+
+  - id: crypto.weak-algorithm-config
+    title: Weak or deprecated crypto named in configuration
+    kind: content
+    confidence: low
+    severity: low
+    cwe: CWE-327
+    owasp_iot: I7
+    pattern: '(?i)\b(sslv2|sslv3|rc4|des-cbc|export-?cipher)\b'
+    globs: ['/etc/*', '*.conf', '*.cfg', '*.ini']
+    max_per_file: 3
+
+  - id: crypto.tls-verify-disabled
+    title: Certificate or peer verification turned off
+    kind: content
+    confidence: low
+    severity: medium
+    cwe: CWE-295
+    owasp_iot: I7
+    pattern: '(?i)\b(?:ssl_?verify\w*|verify_?(?:peer|cert\w*)|check_?cert\w*)\s*[=:]\s*(?:0|false|no|off)\b'
+    globs: ['/etc/*', '*.conf', '*.cfg', '*.ini', '*.sh']
+    max_per_file: 3

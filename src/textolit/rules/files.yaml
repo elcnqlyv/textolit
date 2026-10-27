@@ -1,0 +1,85 @@
+# Filesystem oddities: permissions, names, magic, binaries in the wrong place, hard-coded endpoints.
+pack: files
+rules:
+  - id: perm.world-writable
+    title: World-writable file
+    kind: perm
+    world_writable: true
+    confidence: med
+    severity: medium
+    cwe: CWE-732
+    owasp_iot: I4
+    skip_paths: '^/(tmp|dev|proc|sys|var/tmp|var/run|var/lock)/'
+
+  - id: perm.setuid
+    title: setuid file
+    kind: perm
+    setuid: true
+    confidence: low
+    severity: low
+    cwe: CWE-250
+    owasp_iot: I4
+
+  - id: file.double-extension
+    title: Double-extension file (data extension hiding an executable one)
+    kind: path
+    confidence: med
+    severity: medium
+    cwe: CWE-434
+    owasp_iot: I2
+    pattern: '(?i)\.(jpe?g|png|gif|txt|pdf|html?|cfg|conf|log|ico)\.(sh|cgi|php|bin|elf|exe|pl|py|lua|asp)$'
+
+  - id: file.magic-mismatch
+    title: File content does not match its extension
+    kind: magic
+    confidence: med
+    severity: medium
+    cwe: CWE-434
+    owasp_iot: I2
+    exts: [jpg, jpeg, png, gif, ico, bmp, css, txt, log, html, htm]
+    bad_ftypes: [elf, archive, script]
+
+  - id: bin.elf-in-webroot
+    title: ELF executable in web root outside cgi-bin
+    kind: path
+    ftypes: [elf]
+    confidence: low
+    severity: low
+    cwe: CWE-434
+    owasp_iot: I2
+    pattern: '^/(?:www|web|htdocs|usr/www|var/www)/(?!cgi-bin/)'
+
+  - id: bin.elf-in-writable-partition
+    title: ELF executable in a writable or persistent-state location
+    kind: path
+    ftypes: [elf]
+    confidence: med
+    severity: medium
+    cwe: CWE-494
+    owasp_iot: I4
+    pattern: '^/(?:tmp|nvram|var|mnt/mtd|mtd|param)/'
+
+  - id: net.hardcoded-public-ip
+    title: Hard-coded public IP address
+    kind: content
+    post: public_ip
+    confidence: low
+    severity: low
+    cwe: CWE-547
+    owasp_iot: I1
+    pattern: '(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])'
+    skip_paths: '^/(usr/share|usr/lib|lib)/|\.(js|css|html?|svg|xml|map)$'
+    exclude: '^\s*(#|//)'
+    max_per_file: 3
+
+  - id: net.hardcoded-domain
+    title: Hard-coded domain name
+    kind: content
+    confidence: low
+    severity: low
+    cwe: CWE-547
+    owasp_iot: I1
+    pattern: '(?i)\b(?:[a-z0-9-]+\.)+(?:com|net|org|cn|io|cc|me|info|biz|tv|co)\b'
+    skip_paths: '^/(usr/share|usr/lib|lib)/|\.(js|css|html?|svg|xml|map|txt|md)$'
+    exclude: '(?i)w3\.org|example\.|localhost|schemas|xmlsoap|gnu\.org|apache\.org|ietf\.org|openssl\.org|busybox\.net|kernel\.org|^\s*(#|//)'
+    max_per_file: 3

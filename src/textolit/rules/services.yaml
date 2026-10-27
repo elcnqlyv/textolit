@@ -1,0 +1,80 @@
+# Debug services, backdoor traces and boot-time listeners.
+pack: services
+rules:
+  - id: svc.telnetd-start
+    title: telnetd started by an init script or inetd
+    kind: content
+    confidence: med
+    severity: high
+    cwe: CWE-319
+    owasp_iot: I2
+    pattern: '\btelnetd\b'
+    exclude: '^\s*#|\b(?:kill|killall|pkill|which|echo|rm)\b|\[\s+-[a-z]\s'
+    globs: ['/etc/init.d/*', '/etc/rc*', '/etc/inittab', '/etc/inetd.conf', '/etc/xinetd.d/*', '/etc/*.sh', '/etc/profile', '*/rcS', '*/rc.local', '/sbin/*.sh', '/usr/sbin/*.sh', '/bin/*.sh', '*.service']
+    max_per_file: 3
+
+  - id: svc.dropbear-blank-password
+    title: dropbear started with -B (blank passwords allowed)
+    kind: content
+    confidence: high
+    severity: high
+    cwe: CWE-258
+    owasp_iot: I1
+    pattern: '\bdropbear\b[^\n#]*\s-B\b'
+    max_per_file: 2
+
+  - id: svc.gdbserver
+    title: gdbserver present in a start-up path
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-489
+    owasp_iot: I2
+    pattern: '\bgdbserver\b'
+    exclude: '^\s*#'
+    globs: ['/etc/*', '*.sh', '*.service']
+    max_per_file: 2
+
+  - id: svc.ftp-tftp-start
+    title: FTP or TFTP daemon started at boot
+    kind: content
+    confidence: low
+    severity: medium
+    cwe: CWE-319
+    owasp_iot: I2
+    pattern: '\b(?:tftpd|vsftpd|ftpd|pure-ftpd|proftpd)\b'
+    exclude: '^\s*#|\b(?:kill|killall|pkill|which|echo|rm)\b'
+    globs: ['/etc/init.d/*', '/etc/rc*', '/etc/inittab', '/etc/inetd.conf', '/etc/xinetd.d/*', '*/rcS', '*/rc.local', '*.sh']
+    max_per_file: 3
+
+  - id: svc.console-shell-inittab
+    title: Root shell or login on a serial console from inittab
+    kind: content
+    confidence: med
+    severity: low
+    cwe: CWE-306
+    owasp_iot: I2
+    pattern: '^[^#\n]*(?:askfirst|respawn)[^#\n]*(?:-?/bin/(?:ba|a)?sh)\b'
+    globs: ['*/inittab']
+    max_per_file: 2
+
+  - id: backdoor.suspicious-strings
+    title: Backdoor, hidden-menu or debug-shell wording
+    kind: content
+    bytes: true
+    confidence: low
+    severity: medium
+    cwe: CWE-489
+    owasp_iot: I2
+    pattern: '(?i)\b(backdoor|debug_?shell|rootshell|factory_?shell|hidden_?(?:menu|page|account)|superuser|godmode|master_?password|engineer_?mode)\b'
+    skip_paths: '^/(lib|usr/lib|usr/share)/|\.so(\.\d+)*$'
+    max_per_file: 3
+
+  - id: backdoor.debug-endpoint-name
+    title: Debug or diagnostic CGI/script name in web paths
+    kind: path
+    confidence: low
+    severity: low
+    cwe: CWE-489
+    owasp_iot: I2
+    pattern: '(?i)(^|/)(debug|test|diag|factory|backdoor|shell|cmd|exec|system)\.(cgi|php|asp|lua|sh)$'
