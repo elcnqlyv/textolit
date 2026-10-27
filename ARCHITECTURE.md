@@ -47,6 +47,25 @@ database and case directory.
 - `missedfindings` rule caps (200 hits per rule) are reported, never silent.
 - Jobs in `jobs.SWEEP_AFTER` queue a sweep when they finish successfully.
 
+## Crypto and cracking (sprint 3)
+
+- `crypto` writes `crypto_materials` (hashes, certs, key fingerprints, key strings). Private
+  key bodies are never stored. `hashtypes.py` recognises formats and maps them to hashcat modes.
+- `hashcat.py` only builds argv from a `Profile` (GTX1650 defaults) and an `Attack`. Nothing
+  there runs a process, so commands can be printed, queued or run by hand.
+- `crack.py` owns `crack_tasks`. It runs one task at a time through `core.runner.run_streaming`,
+  which streams stdout, spools it to disk and sends SIGINT when the operator pauses. hashcat
+  writes its restore file into the case, so a resume works after a restart.
+- The `hashcat` job module drains queued tasks. `jobs.Worker(long_jobs=True)` runs it on its
+  own thread so analysis jobs keep flowing.
+- Cracked results update `crypto_materials.cracked`, add a `credentials` row and a finding.
+
+## Web surface (sprint 3)
+
+`websurface` reads files only. It fills `web_surface` (roots, servers, auth guesses, endpoints,
+upload handlers, front-end credentials) and raises findings for upload handlers, browser-side
+login logic and embedded credentials.
+
 ## Where future modules plug in
 
 A new module is a class with `name` and `run`, listed in `registry.py`; it gets a CLI

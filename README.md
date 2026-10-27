@@ -53,12 +53,15 @@ One command-line tool and one terminal workbench turn a vendor firmware download
 - **File index**: every extracted file with type, hash, entropy and mode, plus the paths that matter on CCTV and access-control devices
 - **Binary inventory**: ELF architecture, libraries, stripped or not, and version strings with CVE hints
 - **Netmap**: a listen-by-default table with the file and line behind every port
+- **Crypto**: password hashes from shadow, passwd, htpasswd and SQLite files, certificates, private keys and key strings, each tagged with a hashcat mode
+- **Cracking**: a hashcat queue tuned for a GTX1650 that you can pause and resume
+- **Web surface**: a static map of the web interface, its server, login style, upload handlers and visible credentials
 - **Missed-findings sweep**: YAML rule packs that turn every odd thing into a lead with a confidence and an evidence path
 - **Report**: Markdown grouped by the OWASP IoT Top 10
 
 Every command goes through one subprocess wrapper. It records the argv, the working directory, the exit code and the hashes of stdout and stderr in the case database. The TUI and the CLI share the same job queue, so both leave the same trail.
 
-Textolit needs Python 3.11 or newer. It depends on `textual` and `pyyaml`. It calls external tools when they are present: `binwalk`, `unsquashfs` or `sasquatch`, and `file`. `hashcat` and `radare2` are planned for later modules.
+Textolit needs Python 3.11 or newer. It depends on `textual` and `pyyaml`. It calls external tools when they are present: `binwalk`, `unsquashfs` or `sasquatch`, and `file`. `hashcat` is optional and only needed to run the crack queue. `radare2` is planned for a later module.
 
 > [!WARNING]
 > **Authorized testing only.** Textolit reads firmware you are allowed to analyze. It does not emulate, exploit or touch a live device. It stays air-gapped by default. The LLM toggle is off per case until you turn it on and confirm.
@@ -119,7 +122,7 @@ options:
   --version             show program's version number and exit
 ```
 
-Every module takes the case directory as its first argument, so the same commands work in scripts. These modules are stubs for now and report that they are not implemented: `crypto`, `websurface` and `llm`.
+Every module takes the case directory as its first argument, so the same commands work in scripts. The `llm` module is a stub for now and reports that it is not implemented.
 
 ## Workflow
 
@@ -165,15 +168,43 @@ textolit fswalk ./case-foo
 textolit binintel ./case-foo
 textolit netmap ./case-foo
 
-# 4. review leads
+# 4. extract hashes and keys, map the web interface
+textolit crypto ./case-foo
+textolit websurface ./case-foo
+
+# 5. review leads
 textolit findings ./case-foo
 textolit decide ./case-foo 4 reject --note "lab placeholder"
 
-# 5. write the report
+# 6. write the report
 textolit report ./case-foo
 ```
 
 Extraction runs under `umask 0`. File modes in the index are the image's modes, so a world-writable file stays visible.
+
+## Cracking with hashcat
+
+`textolit crypto` lists every hash it found with the hashcat mode it suggests. Raw 32-hex hashes are ambiguous (MD5, MD4 or NTLM), so those carry a lower confidence. Then plan and run the attacks:
+
+```bash
+textolit crack ./case-foo plan --wordlist /usr/share/wordlists/rockyou.txt --gpu-budget 90m
+textolit crack ./case-foo run
+textolit crack ./case-foo status
+textolit crack ./case-foo pause 3      # SIGINT, hashcat writes a checkpoint
+textolit crack ./case-foo resume 3     # continues from the checkpoint
+```
+
+`plan` prints the exact hashcat command for every stage and queues it. Stages run cheapest first: a short list of IoT default passwords, then your wordlist, then your wordlist with `best64`/`best66` rules, then digit masks. The default profile is built for a GTX1650 with 4 GB of VRAM:
+
+| Setting | Default | Why |
+| --- | --- | --- |
+| `-w` | `2` | Leaves the desktop usable. Use `-w 3` when the machine is idle |
+| `-O` | fast hashes only | Optimized kernels cap the password length, so slow modes skip them |
+| `--gpu-budget` | none | Wall-clock cap per stage, passed to hashcat as `--runtime` |
+| `--temp-abort` | `85` | Passed as `--hwmon-temp-abort` |
+| VRAM kept free | `10%` | `--backend-devices-keepfree` |
+
+Memory-hard modes such as scrypt only get the default list and a warning. A cracked password becomes a high-confidence finding with the source file and line of the hash. The queue lives in SQLite, so a killed session leaves tasks `paused` and nothing restarts until you resume it. Pass `--hashcat /path/to/hashcat` to use another binary.
 
 ## Workbench (TUI)
 
@@ -181,7 +212,7 @@ Extraction runs under `umask 0`. File modes in the index are the image's modes, 
 textolit tui ./case-foo
 ```
 
-The workbench opens on the signature banner, then the dashboard. Tabs cover Dashboard, Entropy, Artifacts, Netmap, Findings, Jobs and Commands. A job footer shows progress for queued and running jobs. State lives in SQLite, so a killed session resumes where it stopped. Jobs that were running when the process died show as `interrupted` and do not restart on their own.
+The workbench opens on the signature banner, then the dashboard. Tabs cover Dashboard, Entropy, Artifacts, Netmap, Web, Crypto, Crack, Findings, Jobs and Commands. Cracking runs on its own worker, so analysis jobs never wait behind it. A job footer shows progress for queued and running jobs. State lives in SQLite, so a killed session resumes where it stopped. Jobs that were running when the process died show as `interrupted` and do not restart on their own.
 
 | Key | Action |
 | --- | --- |
@@ -194,6 +225,7 @@ The workbench opens on the signature banner, then the dashboard. Tabs cover Dash
 | `F10` | Quit, with a guard while jobs are running |
 | `p` | Queue the full pipeline |
 | `a` `x` `s` | Accept, reject or snooze the selected finding |
+| `g` | Plan and run hashcat attacks. On the Crack tab `space` pauses or resumes and `x` cancels |
 
 ## Rule packs
 
