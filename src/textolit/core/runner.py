@@ -181,10 +181,9 @@ def run_streaming(
                         fout.write(raw)
                         out_h.update(raw)
                         on_line(raw.decode("utf-8", "replace").rstrip("\n"))
-                        continue
                 except queue.Empty:
                     pass
-                if proc.poll() is not None and not reader.is_alive():
+                if proc.poll() is not None and not reader.is_alive() and lines.empty():
                     done = True
                 if asked_at is None and should_stop is not None and should_stop():
                     stopped, asked_at = "interrupt", time.monotonic()
