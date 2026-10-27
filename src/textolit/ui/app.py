@@ -16,6 +16,7 @@ from textolit.core import jobs
 from textolit.core.case import Case
 from textolit.core.ledger import decide
 from textolit.hashcat import Profile
+from textolit.llm_backends import BackendError, is_loopback, load_config
 from textolit.ui.panes import (
     ArtifactsPane,
     CommandsPane,
@@ -25,6 +26,7 @@ from textolit.ui.panes import (
     EntropyPane,
     FindingsPane,
     JobsPane,
+    LlmPane,
     NetMapPane,
     WebPane,
 )
@@ -67,6 +69,10 @@ class TextolitApp(App[None]):
         Binding("x", "decide('rejected')", "Reject"),
         Binding("s", "decide('snoozed')", "Snooze"),
         Binding("g", "crack_plan", "Crack plan"),
+        Binding("t", "llm_task('triage')", "Triage"),
+        Binding("c", "llm_task('crypto')", "Crypto LLM"),
+        Binding("d", "llm_task('draft')", "Draft"),
+        Binding("v", "llm_cve", "CVE draft"),
         Binding("space", "crack_toggle", "Pause/resume"),
     ]
 
@@ -95,6 +101,8 @@ class TextolitApp(App[None]):
                 yield CryptoPane(id="pane-crypto")
             with TabPane("Crack", id="tab-crack"):
                 yield CrackPane(id="pane-crack")
+            with TabPane("LLM", id="tab-llm"):
+                yield LlmPane(id="pane-llm")
             with TabPane("Findings", id="tab-findings"):
                 yield FindingsPane(id="pane-findings")
             with TabPane("Jobs", id="tab-jobs"):
@@ -135,6 +143,7 @@ class TextolitApp(App[None]):
         self.query_one("#pane-web", WebPane).refresh_data(self.case)
         self.query_one("#pane-crypto", CryptoPane).refresh_data(self.case)
         self.query_one("#pane-crack", CrackPane).refresh_data(self.case)
+        self.query_one("#pane-llm", LlmPane).refresh_data(self.case)
         self.query_one("#pane-findings", FindingsPane).refresh_data(self.case)
         self.query_one("#pane-jobs", JobsPane).refresh_data(self.case)
         self.query_one("#pane-commands", CommandsPane).refresh_data(self.case)
@@ -186,9 +195,15 @@ class TextolitApp(App[None]):
             self.case.set_llm(False)
             self._refresh_status()
             return
+        try:
+            cfg = load_config(self.case)
+            where = "on this machine" if is_loopback(cfg.url) else "to a REMOTE host"
+            target = f"{cfg.backend} {cfg.model or '(no model set)'} {where}"
+        except BackendError:
+            target = "an unreadable llm.json"
         question = (
-            "Enable LLM for this case? Case evidence excerpts may be sent to the configured "
-            "backend. Default is OFF; every call is logged."
+            f"Enable LLM for this case? Evidence excerpts (secrets masked) go to {target}. "
+            "Default is OFF. Every call is logged."
         )
 
         def decide(ok: bool | None) -> None:
@@ -250,6 +265,27 @@ class TextolitApp(App[None]):
             return
         jobs.enqueue(self.case, "hashcat")
         self.notify(f"queued {len(ids)} crack tasks (-w 2, default list then digit masks)")
+
+    def _llm_ready(self) -> bool:
+        if not self.case.llm_enabled:
+            self.notify("LLM is off for this case. Press F5 to turn it on.", severity="warning")
+            return False
+        return True
+
+    def action_llm_task(self, task: str) -> None:
+        if self.query_one(TabbedContent).active != "tab-llm" or not self._llm_ready():
+            return
+        jid = jobs.enqueue(self.case, "llm", task=task)
+        self.notify(f"queued LLM {task} (job {jid}). The reply is validated before use.")
+
+    def action_llm_cve(self) -> None:
+        if self.query_one(TabbedContent).active != "tab-findings" or not self._llm_ready():
+            return
+        fid = self.query_one("#pane-findings", FindingsPane).selected_id()
+        if fid is None:
+            return
+        jid = jobs.enqueue(self.case, "llm", task="cve", finding=fid)
+        self.notify(f"queued CVE write-up draft for finding {fid} (job {jid})")
 
     def action_export(self) -> None:
         jid = jobs.enqueue(self.case, "report", formats=["all"])

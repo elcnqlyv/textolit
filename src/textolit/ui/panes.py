@@ -348,3 +348,71 @@ class CrackPane(Vertical):
                 for t in crack.list_tasks(case)
             ],
         )
+
+
+class LlmPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static(id="llm-status", markup=False)
+        yield Static(
+            "t triage, c crypto, d report draft, v CVE write-up (Findings tab). "
+            "Replies are validated against the evidence. Leads, not verdicts.",
+            classes="muted",
+        )
+        yield DataTable(id="llm-calls", cursor_type="row")
+        yield Static(id="llm-latest", markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#llm-calls", DataTable).add_columns(
+            "id", "task", "model", "tokens in/out", "status", "prompt sha256"
+        )
+
+    def refresh_data(self, case: Case) -> None:
+        import json
+
+        from textolit.llm_backends import BackendError, is_loopback, load_config, problems
+
+        try:
+            cfg = load_config(case)
+            where = "local" if is_loopback(cfg.url) else "REMOTE"
+            issue = problems(cfg)
+            line = f"{cfg.backend} / {cfg.model or 'no model'} / {where}"
+            if issue:
+                line += f"   not usable yet: {issue}"
+        except BackendError as exc:
+            line = f"bad llm.json: {exc}"
+        state = "LLM ACTIVE" if case.llm_enabled else "LLM off (F5 to turn on)"
+        self.query_one("#llm-status", Static).update(f"{state}   {line}")
+        rows = case.conn.execute("SELECT * FROM llm_calls ORDER BY id DESC LIMIT 200").fetchall()
+        sync_table(
+            self.query_one("#llm-calls", DataTable),
+            [
+                (
+                    r["id"],
+                    r["template"].removesuffix(".txt"),
+                    r["model"],
+                    f"{r['tokens_in']}/{r['tokens_out']}",
+                    r["status"],
+                    r["prompt_sha256"][:16],
+                )
+                for r in rows
+            ],
+        )
+        text = Text()
+        latest = case.root / "artifacts/llm/triage-latest.json"
+        if latest.is_file():
+            try:
+                doc = json.loads(latest.read_text("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                doc = None
+            if doc:
+                data = doc["data"]
+                text.append(
+                    f"Latest triage (call {doc['call_id']}, unverified draft)\n",
+                    style="bold #c9a227",
+                )
+                text.append(f"{data.get('summary', '')}\n")
+                for p in data.get("priorities", []):
+                    text.append(f"  {p['finding']}: {p['reason']}  [{', '.join(p['cites'])}]\n")
+                for u in data.get("unverified", []):
+                    text.append(f"  unverified: {u}\n", style="#d9822b")
+        self.query_one("#llm-latest", Static).update(text)

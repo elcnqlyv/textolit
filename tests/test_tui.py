@@ -186,3 +186,63 @@ async def _crack_flow(tmp_path: Path) -> None:
         await pilot.press("x")  # cancel
         await pilot.pause()
         assert crack.list_tasks(case)[0].status == "cancelled"
+
+
+def test_llm_tab_and_gating(tmp_path: Path) -> None:
+    asyncio.run(_llm_flow(tmp_path))
+
+
+async def _llm_flow(tmp_path: Path) -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from llm_server import FakeLlm
+    from textual.widgets import DataTable
+
+    from textolit.core import jobs
+    from textolit.core.ledger import add_finding, ensure_heuristic
+    from textolit.llm_backends import LlmConfig, save_config
+
+    with FakeLlm() as srv:
+        srv.reply = json.dumps(
+            {
+                "summary": "One lead.",
+                "priorities": [{"finding": "F1", "reason": "check it", "cites": ["F1", "E1"]}],
+                "unverified": [],
+            }
+        )
+        case = Case.create(tmp_path / "c")
+        ensure_heuristic(case, "x.a", "t", "t", "high")
+        add_finding(
+            case,
+            heuristic_id="x.a",
+            title="lead",
+            evidence_path="p",
+            line=1,
+            snippet="s",
+            confidence="high",
+            severity="high",
+            owasp_iot="I1",
+        )
+        save_config(case, LlmConfig(model="m", base_url=srv.url))
+        app = TextolitApp(case, splash=False, worker=False)
+        async with app.run_test(size=(150, 40)) as pilot:
+            await pilot.pause()
+            assert "LLM off" in str(app.query_one("#llm-status").render())
+            app.query_one("TabbedContent").active = "tab-llm"
+            await pilot.pause()
+            await pilot.press("t")  # off: nothing is queued
+            await pilot.pause()
+            assert not [j for j in jobs.list_jobs(case) if j.module == "llm"]
+            case.set_llm(True)
+            await pilot.press("t")
+            await pilot.pause()
+            queued = [j for j in jobs.list_jobs(case) if j.module == "llm"]
+            assert len(queued) == 1 and queued[0].args == {"task": "triage"}
+            jobs.run_job(case, queued[0].id)
+            app.refresh_panes()
+            await pilot.pause()
+            assert app.query_one("#llm-calls", DataTable).row_count == 1
+            assert "Latest triage" in str(app.query_one("#llm-latest").render())
+            assert "LLM ACTIVE" in str(app.query_one("#llm-status").render())
