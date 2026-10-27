@@ -3,9 +3,22 @@ from pathlib import Path
 from textolit.db.connection import connect, migrate
 
 EXPECTED = {
-    "cases", "images", "artifacts", "regions", "files", "binaries", "services",
-    "network_endpoints", "credentials", "crypto_materials", "findings", "heuristics",
-    "llm_calls", "commands", "evidence_links", "jobs",
+    "cases",
+    "images",
+    "artifacts",
+    "regions",
+    "files",
+    "binaries",
+    "services",
+    "network_endpoints",
+    "credentials",
+    "crypto_materials",
+    "findings",
+    "heuristics",
+    "llm_calls",
+    "commands",
+    "evidence_links",
+    "jobs",
 }
 
 
