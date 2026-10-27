@@ -49,12 +49,16 @@ def test_module_records_binaries_and_findings(tmp_path: Path) -> None:
     (root / "usr/sbin").mkdir(parents=True)
     exe = shutil.which("ls")
     assert exe
-    (root / "usr/sbin/httpd").write_bytes(Path(exe).read_bytes() + b"\0OpenSSL 1.0.1e 11 Feb\0")
+    (root / "usr/sbin/httpd").write_bytes(
+        Path(exe).read_bytes() + b"\0OpenSSL 1.0.1e 11 Feb\0Dropbear sshd v2012.55\0"
+    )
     add_artifact(case, "fs_root:squashfs", root, hash_it=False)
     assert FsWalk().run(case).ok
     res = BinIntel().run(case)
-    assert res.ok and res.data["hints"] == 1
+    assert res.ok and res.data["hints"] == 2  # two hints on one file must both be kept
     assert case.conn.execute("SELECT count(*) FROM binaries").fetchone()[0] == 1
-    f = case.conn.execute("SELECT * FROM findings").fetchone()
+    rows = case.conn.execute("SELECT * FROM findings ORDER BY id").fetchall()
+    assert len(rows) == 2
+    f = next(r for r in rows if "openssl" in r["title"])
     assert f["confidence"] == "low" and "CVE-2014-0160" in f["detail"]
     assert f["evidence_path"].endswith("usr/sbin/httpd")

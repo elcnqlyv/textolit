@@ -60,13 +60,13 @@ def add_finding(
     owasp_iot: str | None = None,
     cwe: str | None = None,
 ) -> int | None:
-    """Insert a finding unless an identical one exists (same rule, path, line).
+    """Insert a finding unless an identical one exists (same rule, path, line, title).
 
     Returns the new id, or None when it was already recorded. A rejected or snoozed
     finding keeps its status, so a re-scan never resurrects a decision the operator made.
     """
     fingerprint = hashlib.sha256(
-        f"{heuristic_id}\0{evidence_path}\0{line or 0}".encode()
+        f"{heuristic_id}\0{evidence_path}\0{line or 0}\0{title}".encode()
     ).hexdigest()
     with case.conn:
         cur = case.conn.execute(
