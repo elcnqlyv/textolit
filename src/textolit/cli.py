@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--image", type=Path)
     init.add_argument("--name")
 
+    tui = sub.add_parser("tui", help="open the workbench for a case")
+    tui.add_argument("case", type=Path)
+
     jl = sub.add_parser("jobs", help="list queued/finished jobs for a case")
     jl.add_argument("case", type=Path)
 
@@ -83,6 +86,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         case = Case.open(args.case)
         jobs.mark_interrupted(case)
+        if args.command == "tui":
+            from textolit.ui.app import TextolitApp
+
+            TextolitApp(case).run()
+            return 0
         if args.command == "jobs":
             for j in jobs.list_jobs(case):
                 print(f"{j.id:>4} {j.status:<11} {j.progress:4.0%} {j.module:<14} {j.message}")

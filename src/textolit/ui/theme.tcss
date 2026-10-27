@@ -1,0 +1,124 @@
+/* Textolit: dark PCB. Solder-mask green, copper accents, silkscreen text.
+   $panel (#10261a) and $warning (#d9822b) are supplied by the registered Textual theme
+   (see app.py): Textual's own stylesheet consumes those names, so redeclaring them here
+   with plain colours breaks its built-in rules. */
+$substrate: #0b1a12;
+$trace: #2e8b57;
+$copper: #c9a227;
+$pad: #b87333;
+$silk: #e8e6df;
+$danger: #c0392b;
+$muted: #6b7f73;
+
+Screen {
+    background: $substrate;
+    color: $silk;
+}
+
+#brand {
+    height: 1;
+    padding: 0 1;
+    color: $copper;
+    text-style: bold;
+    background: $substrate;
+}
+
+TraceRule {
+    height: 1;
+    color: $trace;
+    background: $substrate;
+}
+
+#statusbar {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $muted;
+}
+
+#statusbar.llm-on {
+    color: $substrate;
+    background: $warning;
+    text-style: bold;
+}
+
+SplashScreen {
+    align: center middle;
+    background: $substrate;
+}
+
+#splash-banner {
+    width: auto;
+    height: auto;
+    color: $copper;
+}
+
+#splash-tone {
+    width: auto;
+    margin-top: 1;
+    color: $muted;
+}
+
+.panel {
+    border: heavy $trace;
+    background: $panel;
+    padding: 0 1;
+}
+
+.panel:focus, DataTable:focus, Tree:focus, DirectoryTree:focus, RichLog:focus {
+    border: round $copper;
+}
+
+.heading {
+    color: $copper;
+    text-style: bold;
+}
+
+.muted { color: $muted; }
+.warn { color: $warning; }
+.danger { color: $danger; }
+
+TabbedContent { background: $substrate; }
+Tabs { background: $substrate; }
+Tab { color: $muted; background: $substrate; }
+Tab.-active { color: $copper; text-style: bold; }
+Tab:hover { color: $silk; }
+Underline > .underline--bar { color: $copper; background: $trace; }
+TabPane { padding: 0; background: $substrate; }
+
+DataTable {
+    background: $panel;
+    border: heavy $trace;
+}
+DataTable > .datatable--header { background: $substrate; color: $copper; text-style: bold; }
+DataTable > .datatable--cursor { background: $trace; color: $silk; }
+
+DirectoryTree, Tree { background: $panel; border: heavy $trace; }
+
+RichLog { background: $panel; border: heavy $trace; height: 10; }
+
+#jobbar {
+    height: auto;
+    max-height: 6;
+    padding: 0 1;
+    background: $panel;
+    color: $silk;
+}
+
+Footer { background: $panel; }
+FooterKey { background: $panel; color: $muted; }
+FooterKey .footer-key--key { color: $copper; background: $substrate; text-style: bold; }
+FooterKey .footer-key--description { color: $silk; }
+
+ModalScreen { align: center middle; background: $substrate 70%; }
+#dialog {
+    width: 60;
+    height: auto;
+    border: heavy $copper;
+    background: $panel;
+    padding: 1 2;
+}
+#dialog Label { width: 100%; margin-bottom: 1; }
+#dialog Horizontal { height: auto; align: center middle; }
+Button { background: $substrate; color: $silk; border: round $trace; min-width: 12; margin: 0 1; }
+Button:focus { border: round $copper; color: $copper; }
