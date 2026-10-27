@@ -12,3 +12,4 @@ cases/
 *.bin
 *.img
 *.squashfs
+*.zip
