@@ -108,3 +108,16 @@ def test_cli_crypto_and_websurface(tmp_path: Path, capsys: pytest.CaptureFixture
     assert "md5crypt" in out and "500" in out and "textolit crack" in out
     assert main(["websurface", str(case_dir)]) == 0
     assert "1 web roots" in capsys.readouterr().out
+
+
+def test_cli_report_formats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    img = tmp_path / "fw.bin"
+    img.write_bytes(os.urandom(4096))
+    case = tmp_path / "case"
+    assert main(["init", str(case), "--image", str(img)]) == 0
+    assert main(["report", str(case), "--format", "md", "--format", "json"]) == 0
+    out = capsys.readouterr().out
+    assert ".md" in out and "cve-ready-" in out and "no entries" in out
+    with pytest.raises(SystemExit) as exc:
+        main(["report", str(case), "--format", "rtf"])
+    assert exc.value.code == 2

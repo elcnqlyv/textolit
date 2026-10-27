@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from textolit.core.case import Case
 from textolit.modules.entropy import Entropy
 from textolit.modules.ingest import Ingest
@@ -136,3 +138,62 @@ def test_report_rollup_and_appendix(tmp_path: Path) -> None:
     )
     assert "| I2 | Insecure Network Services | 2 |" in body
     assert "## Evidence appendix" in body and "| image |" in body and "evidence links" in body
+
+
+def _case_with_accepted(tmp_path: Path) -> Case:
+    from textolit.core.ledger import add_finding, decide, ensure_heuristic
+
+    img = tmp_path / "fw.bin"
+    img.write_bytes(os.urandom(4096))
+    case = Case.create(tmp_path / "c")
+    Ingest().run(case, image=img)
+    ensure_heuristic(case, "creds.empty-password-field", "creds", "t", "high")
+    fid = add_finding(
+        case,
+        heuristic_id="creds.empty-password-field",
+        title="Account with an empty password field",
+        evidence_path="artifacts/x/etc/passwd",
+        line=1,
+        snippet="root::0:0",
+        confidence="high",
+        severity="high",
+        cwe="CWE-258",
+        owasp_iot="I1",
+    )
+    assert fid
+    decide(case, fid, "accepted")
+    return case
+
+
+def test_report_all_formats(tmp_path: Path) -> None:
+    import json
+
+    case = _case_with_accepted(tmp_path)
+    res = Report().run(case, formats=["all"])
+    assert res.ok, res.errors
+    names = sorted(Path(p).suffix for p in res.data["paths"])
+    assert names == [".docx", ".json", ".md", ".pdf"]
+    cve = next(p for p in res.data["paths"] if p.endswith(".json"))
+    doc = json.loads((case.root / cve).read_text())
+    assert doc["entries"][0]["cvss_v31"]["base_score"] == 9.8
+    kinds = [r[0] for r in case.conn.execute("SELECT kind FROM artifacts WHERE kind='report'")]
+    assert len(kinds) == 4
+
+
+def test_report_missing_export_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    case = _case_with_accepted(tmp_path)
+    monkeypatch.setitem(sys.modules, "docx", None)
+    explicit = Report().run(case, formats=["md", "docx"])
+    assert not explicit.ok and any("python-docx" in e for e in explicit.errors)
+    assert explicit.data["paths"][0].endswith(".md")  # the other format is still written
+    soft = Report().run(case, formats=["all"])
+    assert soft.ok and any("python-docx" in w for w in soft.warnings)
+
+
+def test_report_unknown_format_and_empty_cve_warning(tmp_path: Path) -> None:
+    case = Case.create(tmp_path / "c")
+    assert not Report().run(case, formats=["rtf"]).ok
+    res = Report().run(case, formats=["json"])
+    assert res.ok and any("no entries" in w for w in res.warnings)

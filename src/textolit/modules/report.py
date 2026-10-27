@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from textolit.core.case import Case, utcnow
@@ -446,16 +447,67 @@ def render_markdown(case: Case) -> str:
     return "\n".join(out)
 
 
+FORMATS = ("md", "docx", "pdf", "json")
+
+
 class Report:
     name = "report"
 
     def run(self, case: Case, progress: ProgressFn = no_progress, **options: Any) -> ModuleResult:
+        from textolit.export_cve import build as build_cve
+        from textolit.export_docs import ExportError, write_docx, write_pdf
+
+        requested = list(options.get("formats") or ["md"])
+        explicit = "all" not in requested
+        formats = list(FORMATS) if "all" in requested else requested
+        bad = [f for f in formats if f not in FORMATS]
+        if bad:
+            return ModuleResult(
+                self.name, False, "unknown format", errors=[f"unknown format: {', '.join(bad)}"]
+            )
+        statuses = ("accepted", "pending") if options.get("include_pending") else ("accepted",)
+
         text = render_markdown(case)
         case.reports_dir.mkdir(parents=True, exist_ok=True)
         stamp = utcnow().replace(":", "").replace("-", "")[:15]
-        path = case.reports_dir / f"report-{stamp}.md"
-        path.write_text(text, encoding="utf-8")
-        add_artifact(case, "report", path)
+        written: list[str] = []
+        warnings: list[str] = []
+        errors: list[str] = []
+
+        def record(path: Path) -> None:
+            add_artifact(case, "report", path)
+            written.append(case.rel(path))
+
+        for i, fmt in enumerate(formats):
+            progress(i / len(formats), f"writing {fmt}")
+            path = case.reports_dir / f"report-{stamp}.{fmt}"
+            try:
+                if fmt == "md":
+                    path.write_text(text, encoding="utf-8")
+                elif fmt == "json":
+                    doc = build_cve(case, statuses)
+                    path = case.reports_dir / f"cve-ready-{stamp}.json"
+                    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+                    if not doc["entries"]:
+                        warnings.append(
+                            "cve json has no entries: only accepted findings are exported"
+                            " (use --include-pending to add pending ones)"
+                        )
+                elif fmt == "docx":
+                    write_docx(text, path)
+                else:
+                    write_pdf(text, path)
+            except ExportError as exc:
+                (errors if explicit else warnings).append(f"{fmt}: {exc}")
+                continue
+            record(path)
+        if not written:
+            return ModuleResult(self.name, False, "nothing written", errors=errors or warnings)
         return ModuleResult(
-            self.name, True, f"wrote {case.rel(path)}", data={"path": case.rel(path)}
+            self.name,
+            not errors,
+            f"wrote {', '.join(written)}",
+            data={"path": written[0], "paths": written},
+            warnings=warnings,
+            errors=errors,
         )

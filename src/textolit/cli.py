@@ -26,6 +26,25 @@ MODULE_OPTIONS: dict[str, list[tuple[str, dict[str, Any]]]] = {
     ],
     "unpack": [("--timeout", {"type": float, "help": "seconds per binwalk invocation"})],
     "entropy": [("--window", {"type": int, "help": "window size in bytes (default 4096)"})],
+    "report": [
+        (
+            "--format",
+            {
+                "action": "append",
+                "dest": "formats",
+                "choices": ["md", "docx", "pdf", "json", "all"],
+                "help": "output format, repeatable (default md). json = CVE-ready",
+            },
+        ),
+        (
+            "--include-pending",
+            {
+                "action": "store_true",
+                "dest": "include_pending",
+                "help": "also put pending findings in the CVE JSON",
+            },
+        ),
+    ],
     "missedfindings": [
         ("--rules-dir", {"type": Path, "dest": "rules_dir", "help": "extra YAML rule packs"})
     ],

@@ -252,8 +252,8 @@ class TextolitApp(App[None]):
         self.notify(f"queued {len(ids)} crack tasks (-w 2, default list then digit masks)")
 
     def action_export(self) -> None:
-        jid = jobs.enqueue(self.case, "report")
-        self.notify(f"queued report export (job {jid})")
+        jid = jobs.enqueue(self.case, "report", formats=["all"])
+        self.notify(f"queued report export: md, docx, pdf, CVE json (job {jid})")
 
     def action_pipeline(self) -> None:
         if self.case.conn.execute("SELECT 1 FROM images LIMIT 1").fetchone() is None:
