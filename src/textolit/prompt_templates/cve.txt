@@ -1,0 +1,17 @@
+TASK: CVE write-up draft
+Draft the text of a vulnerability write-up for the single finding in CONTEXT. Describe only
+what the cited evidence shows. Leave versions, vendor and exploitability to the analyst: list
+what is missing in "references_needed".
+
+SCHEMA:
+{
+  "finding": "F12",
+  "title": "short vulnerability title",
+  "description": "what the evidence shows, in plain words",
+  "impact": "the impact that follows directly from the evidence",
+  "cwe": "CWE id from CONTEXT, or null",
+  "affected": "what the evidence says about the affected component, or an empty string",
+  "references_needed": ["facts the analyst must supply, such as affected versions"],
+  "cites": ["F12", "E34"],
+  "unverified": ["things you suspect but the evidence does not prove"]
+}

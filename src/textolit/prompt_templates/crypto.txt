@@ -1,0 +1,12 @@
+TASK: crypto reasoning
+For each crypto item in CONTEXT, say what the evidence implies about its strength and what an
+analyst could try next. Use hashcat mode numbers and speed classes only as given in CONTEXT.
+
+SCHEMA:
+{
+  "assessments": [
+    {"material": "M5", "assessment": "what the evidence shows about strength or risk",
+     "suggested_attack": "a short next step, or null", "cites": ["M5"]}
+  ],
+  "unverified": ["things you suspect but the evidence does not prove"]
+}

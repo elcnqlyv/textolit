@@ -1,0 +1,12 @@
+TASK: triage
+Rank the findings in CONTEXT by what an analyst should check first, and explain why in terms
+of the cited evidence. Prefer findings with high confidence and direct evidence.
+
+SCHEMA:
+{
+  "summary": "two or three sentences on what the evidence shows",
+  "priorities": [
+    {"finding": "F12", "reason": "why to look at this first", "cites": ["F12", "E34"]}
+  ],
+  "unverified": ["things you suspect but the evidence does not prove"]
+}

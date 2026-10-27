@@ -1,0 +1,13 @@
+TASK: report draft
+Draft narrative text for a firmware assessment report from the findings, crypto items and web
+surface in CONTEXT. Write for a reader who has not seen the evidence. Keep every statement
+tied to cited ids. This text is a draft that a human will check.
+
+SCHEMA:
+{
+  "executive_summary": {"text": "short summary", "cites": ["F1"]},
+  "sections": [
+    {"title": "section title", "body": "paragraph text", "cites": ["F1", "E2"]}
+  ],
+  "unverified": ["things you suspect but the evidence does not prove"]
+}
