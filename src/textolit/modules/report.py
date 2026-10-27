@@ -26,7 +26,7 @@ def render_markdown(case: Case) -> str:
         "",
         "Textolit — firmware triage workbench for CCTV and access-control research.",
         "",
-        f"Generated {utcnow()}. Authorized testing only; leads, not verdicts.",
+        f"Report time {utcnow()}. Authorized testing only; leads, not verdicts.",
         "",
         "## Images",
         "",
