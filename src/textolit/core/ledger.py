@@ -114,3 +114,16 @@ def fs_roots(case: Case) -> list[tuple[int, Path]]:
             "SELECT id, path FROM artifacts WHERE kind='extract_root' ORDER BY id"
         ).fetchall()
     return [(int(r["id"]), case.root / r["path"]) for r in rows]
+
+
+def decide(case: Case, finding_id: int, status: str, note: str = "") -> None:
+    """Record an operator decision. Rejections stay in the database for the case record."""
+    if status not in ("pending", "accepted", "rejected", "snoozed"):
+        raise ValueError(f"bad status: {status}")
+    with case.conn:
+        cur = case.conn.execute(
+            "UPDATE findings SET status=?, decided_at=?, decision_note=? WHERE id=?",
+            (status, utcnow() if status != "pending" else None, note or None, finding_id),
+        )
+    if cur.rowcount != 1:
+        raise ValueError(f"no such finding: {finding_id}")
