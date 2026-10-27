@@ -30,6 +30,7 @@ def test_default_profile_is_w2_and_gtx1650_safe() -> None:
         outfile="o.txt",
         potfile="p.pot",
         session="s1",
+        restore_file="r.restore",
         attack=Attack("wordlist", "l", wordlist="w.txt"),
     )
     assert argv[:7] == ["hashcat", "-m", "0", "-a", "0", "-w", "2"]
@@ -48,6 +49,7 @@ def test_slow_modes_skip_optimized_and_budget_sets_runtime() -> None:
         outfile="o",
         potfile="p",
         session="s",
+        restore_file="r",
         attack=Attack("mask", "m", mask="?d?d?d?d", increment=(4, 4)),
     )
     assert "-O" not in argv and argv[argv.index("-w") + 1] == "3"
@@ -66,8 +68,17 @@ def test_restore_command() -> None:
         session="s9",
         attack=Attack("wordlist", "l", wordlist="w"),
         restore=True,
+        restore_file="s9.restore",
     )
-    assert argv == ["hashcat", "--session", "s9", "--restore", "--potfile-path", "p"]
+    assert argv[:6] == [
+        "hashcat",
+        "--session",
+        "s9",
+        "--restore",
+        "--restore-file-path",
+        "s9.restore",
+    ]
+    assert "--status-json" in argv
 
 
 def test_plan_orders_cheap_first_and_warns() -> None:

@@ -139,10 +139,24 @@ def build_command(
     potfile: str,
     session: str,
     attack: Attack,
+    restore_file: str,
     restore: bool = False,
 ) -> list[str]:
     if restore:
-        return [profile.binary, "--session", session, "--restore", "--potfile-path", potfile]
+        return [
+            profile.binary,
+            "--session",
+            session,
+            "--restore",
+            "--restore-file-path",
+            restore_file,
+            "--potfile-path",
+            potfile,
+            "--status",
+            "--status-json",
+            "--status-timer",
+            str(profile.status_timer),
+        ]
     info = mode_info(mode)
     optimized = profile.optimized if profile.optimized is not None else info.speed == "fast"
     argv = [
