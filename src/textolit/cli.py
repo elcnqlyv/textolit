@@ -60,6 +60,27 @@ def build_parser() -> argparse.ArgumentParser:
     fd.add_argument("decision", choices=["accept", "reject", "snooze", "reopen"])
     fd.add_argument("--note", default="")
 
+    ck = sub.add_parser("crack", help="plan, run and control hashcat attacks (GTX1650 profile)")
+    ck.add_argument("case", type=Path)
+    ck.add_argument("action", choices=["plan", "run", "status", "pause", "resume", "cancel"])
+    ck.add_argument("task_id", type=int, nargs="?", help="task id for pause, resume, cancel")
+    ck.add_argument("--wordlist", help="extra wordlist (for example rockyou.txt)")
+    ck.add_argument("--rules", help="rules file (default: best64/best66 if installed)")
+    ck.add_argument("--no-masks", action="store_true", help="skip the digit mask stage")
+    ck.add_argument("--mode", type=int, action="append", help="only this hashcat mode (repeatable)")
+    ck.add_argument("--gpu-budget", dest="budget", help="wall-clock cap per attack, e.g. 90m or 2h")
+    ck.add_argument(
+        "-w",
+        "--workload",
+        type=int,
+        default=2,
+        choices=[1, 2, 3, 4],
+        help="hashcat workload profile (default 2)",
+    )
+    ck.add_argument("--device", help="hashcat -d device id list")
+    ck.add_argument("--temp-abort", type=int, default=85, help="abort at this GPU temp (C)")
+    ck.add_argument("--hashcat", default="hashcat", help="hashcat binary")
+
     for name in builtin_modules():
         p = sub.add_parser(name, help=f"run the {name} module")
         p.add_argument("case", type=Path)
@@ -108,6 +129,63 @@ def run_module(case: Case, module: str, as_json: bool, **options: Any) -> int:
     return 0 if ok else 1
 
 
+def crack_command(case: Case, args: argparse.Namespace) -> int:
+    from textolit import crack
+    from textolit.hashcat import BudgetError, Profile, parse_budget
+
+    if args.action == "plan":
+        try:
+            profile = Profile(
+                binary=args.hashcat,
+                workload=args.workload,
+                devices=args.device,
+                temp_abort=args.temp_abort,
+                budget_seconds=parse_budget(args.budget),
+            )
+        except BudgetError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        ids, warnings = crack.plan_tasks(
+            case,
+            profile,
+            wordlist=args.wordlist,
+            rules=args.rules,
+            masks=not args.no_masks,
+            modes=args.mode,
+        )
+        for w in warnings:
+            print(f"  warning: {w}")
+        if not ids:
+            print("nothing new to queue (no uncracked hashes, or the same attacks already exist)")
+            return 0
+        for tid in ids:
+            print(f"task {tid}: {crack.render(case, tid)}")
+        print(f"{len(ids)} tasks queued. Run: textolit crack {args.case} run")
+        return 0
+    if args.action == "run":
+        problem = crack.check_ready(args.hashcat)
+        if problem:
+            print(f"error: {problem}", file=sys.stderr)
+            return 2
+        return run_module(case, "hashcat", False)
+    if args.action == "status":
+        for t in crack.list_tasks(case):
+            print(
+                f"{t.id:>4} {t.status:<10} {t.progress:4.0%} {t.speed:<10} "
+                f"{t.recovered}/{t.total} {t.label}  {t.message}"
+            )
+        return 0
+    if args.task_id is None:
+        print(f"error: {args.action} needs a task id", file=sys.stderr)
+        return 2
+    try:
+        print(f"task {args.task_id}: {crack.request(case, args.task_id, args.action)}")
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def list_findings(case: Case, status: str) -> int:
     q = (
         "SELECT id, confidence, severity, status, title, evidence_path, "
@@ -146,6 +224,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         case = Case.open(args.case)
         jobs.mark_interrupted(case)
+        if args.command == "crack":
+            return crack_command(case, args)
         if args.command == "findings":
             return list_findings(case, args.status)
         if args.command == "decide":

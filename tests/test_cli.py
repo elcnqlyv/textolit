@@ -45,3 +45,43 @@ def test_cli_sprint2_flow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     assert "leads pending review" in listing and "telnetd" in listing.lower()
     assert main(["decide", str(case_dir), "1", "reject", "--note", "lab fixture"]) == 0
     assert main(["decide", str(case_dir), "999", "reject"]) == 2
+
+
+def test_cli_crack_flow(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import hashlib
+
+    from textolit.core.case import Case
+
+    fake = str(Path(__file__).parent / "fake_hashcat.py")
+    case_dir = tmp_path / "case"
+    case = Case.create(case_dir)
+    case.conn.execute(
+        "INSERT INTO crypto_materials(kind,algo,value,source_path,hashcat_mode,username,"
+        "source_line) VALUES ('hash','md5',?,'artifacts/etc/shadow',0,'admin',1)",
+        (hashlib.md5(b"admin").hexdigest(),),
+    )
+    case.conn.commit()
+    case.close()
+
+    assert (
+        main(
+            ["crack", str(case_dir), "plan", "--hashcat", fake, "--gpu-budget", "90m", "--no-masks"]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "--runtime 5400" in out and "-w 2" in out and "1 tasks queued" in out
+    assert (
+        main(
+            ["crack", str(case_dir), "plan", "--hashcat", fake, "--gpu-budget", "90m", "--no-masks"]
+        )
+        == 0
+    )
+    assert "nothing new to queue" in capsys.readouterr().out
+    assert main(["crack", str(case_dir), "plan", "--gpu-budget", "soon"]) == 2
+    assert main(["crack", str(case_dir), "run", "--hashcat", fake]) == 0
+    assert main(["crack", str(case_dir), "status"]) == 0
+    status = capsys.readouterr().out
+    assert "cracked" in status and "m0 default IoT passwords" in status
+    assert main(["crack", str(case_dir), "pause"]) == 2  # needs an id
+    assert main(["crack", str(case_dir), "run", "--hashcat", "/no/such/hashcat"]) == 2
