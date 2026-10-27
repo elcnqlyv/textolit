@@ -19,6 +19,9 @@ from textolit.modules.base import ModuleResult
 from textolit.modules.registry import builtin_modules
 
 POLL_SECONDS = 0.25
+# Modules whose output feeds the rule sweep. The sweep is queued, never run inline, so it
+# cannot block the job that produced the new evidence.
+SWEEP_AFTER = frozenset({"fswalk", "binintel", "netmap"})
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,12 @@ def run_job(case: Case, job_id: int) -> ModuleResult:
         return ModuleResult(job.module, False, "crashed", errors=[err])
 
     status = "done" if result.ok else "failed"
+    if result.ok and job.module in SWEEP_AFTER:
+        queued = case.conn.execute(
+            "SELECT 1 FROM jobs WHERE module='missedfindings' AND status='queued'"
+        ).fetchone()
+        if queued is None:
+            enqueue(case, "missedfindings")
     with case.conn:
         case.conn.execute(
             "UPDATE jobs SET status=?, progress=?, message=?, error=?, finished_at=? WHERE id=?",

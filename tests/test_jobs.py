@@ -43,3 +43,20 @@ def test_worker_thread_and_cancel(tmp_path: Path) -> None:
     worker.join(2)
     st = {j.id: j.status for j in jobs.list_jobs(case)}
     assert st[dead] == "cancelled" and st[live] == "failed"
+
+
+def test_sweep_is_queued_after_indexing(tmp_path: Path) -> None:
+    from textolit.core.ledger import add_artifact
+
+    case = Case.create(tmp_path / "c")
+    root = case.extract_dir / "image1" / "squashfs-root"
+    (root / "etc").mkdir(parents=True)
+    (root / "etc/passwd").write_text("root::0:0:root:/root:/bin/sh\n")
+    add_artifact(case, "fs_root:squashfs", root, hash_it=False)
+    jobs.enqueue(case, "fswalk")
+    jobs.enqueue(case, "netmap")
+    results = jobs.drain(case)
+    mods = [j.module for j in jobs.list_jobs(case)]
+    assert mods.count("missedfindings") == 1  # deduplicated while one is queued
+    assert all(r.ok for r in results), [r.errors for r in results]
+    assert case.conn.execute("SELECT count(*) FROM findings WHERE status='pending'").fetchone()[0]
