@@ -6,9 +6,16 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.theme import Theme
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Static, TabbedContent, TabPane
 
 from textolit.core.case import Case
+from textolit.ui.panes import (
+    ArtifactsPane,
+    CommandsPane,
+    DashboardPane,
+    EntropyPane,
+    FindingsPane,
+)
 from textolit.ui.screens.splash import SplashScreen
 from textolit.ui.widgets import TraceRule
 
@@ -43,14 +50,34 @@ class TextolitApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Static(TAGLINE, id="brand", markup=False)
         yield TraceRule()
+        with TabbedContent(initial="tab-dashboard"):
+            with TabPane("Dashboard", id="tab-dashboard"):
+                yield DashboardPane(id="pane-dashboard")
+            with TabPane("Entropy", id="tab-entropy"):
+                yield EntropyPane(id="pane-entropy")
+            with TabPane("Artifacts", id="tab-artifacts"):
+                yield ArtifactsPane(id="pane-artifacts")
+            with TabPane("Findings", id="tab-findings"):
+                yield FindingsPane(id="pane-findings")
+            with TabPane("Commands", id="tab-commands"):
+                yield CommandsPane(id="pane-commands")
         yield Static(f"case: {self.case.root}", id="statusbar", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
         self.register_theme(PCB_THEME)
         self.theme = PCB_THEME.name
+        self.set_interval(1.0, self.refresh_panes)
+        self.refresh_panes()
         if self._splash:
             self.push_screen(SplashScreen())
+
+    def refresh_panes(self) -> None:
+        self.query_one("#pane-dashboard", DashboardPane).refresh_data(self.case)
+        self.query_one("#pane-entropy", EntropyPane).refresh_data(self.case)
+        self.query_one("#pane-artifacts", ArtifactsPane).refresh_data(self.case)
+        self.query_one("#pane-findings", FindingsPane).refresh_data(self.case)
+        self.query_one("#pane-commands", CommandsPane).refresh_data(self.case)
 
 
 def launch(case_dir: Path) -> int:

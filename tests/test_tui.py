@@ -29,3 +29,40 @@ async def _splash_flow(tmp_path: Path) -> None:
         await pilot.press("space")
         await pilot.pause()
         assert not isinstance(app.screen, SplashScreen)
+
+
+def test_entropy_strip_maps_classes() -> None:
+    from textolit.ui.panes import entropy_strip
+
+    regions = [
+        {"offset": 0, "length": 100, "entropy": 0.0, "classification": "empty"},
+        {"offset": 100, "length": 100, "entropy": 7.99, "classification": "encrypted"},
+    ]
+    strip = entropy_strip(regions, 4)
+    assert strip.plain == "▁▁██"
+    assert strip.spans[-1].style == "#c0392b"
+
+
+def test_panes_render_from_ledger(tmp_path: Path) -> None:
+    asyncio.run(_pane_flow(tmp_path))
+
+
+async def _pane_flow(tmp_path: Path) -> None:
+    import os
+
+    from textual.widgets import DataTable
+
+    from textolit.modules.entropy import Entropy
+    from textolit.modules.ingest import Ingest
+
+    img = tmp_path / "fw.bin"
+    img.write_bytes(os.urandom(16384))
+    case = Case.create(tmp_path / "c")
+    Ingest().run(case, image=img)
+    Entropy().run(case)
+    app = TextolitApp(case, splash=False)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#regions", DataTable).row_count >= 1
+        assert app.query_one("#commands", DataTable).row_count >= 1
+        assert "0 leads pending review" in str(app.query_one("#dash-body").render())
