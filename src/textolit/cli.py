@@ -26,6 +26,9 @@ MODULE_OPTIONS: dict[str, list[tuple[str, dict[str, Any]]]] = {
     ],
     "unpack": [("--timeout", {"type": float, "help": "seconds per binwalk invocation"})],
     "entropy": [("--window", {"type": int, "help": "window size in bytes (default 4096)"})],
+    "missedfindings": [
+        ("--rules-dir", {"type": Path, "dest": "rules_dir", "help": "extra YAML rule packs"})
+    ],
 }
 
 

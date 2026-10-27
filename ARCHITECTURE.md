@@ -37,6 +37,16 @@ database and case directory.
 - `ui/`: Textual app. Reads the database on a 1 Hz timer; never calls modules directly,
   only enqueues jobs. The CLI uses the same enqueue/run path, so both leave the same trail.
 
+## Evidence model (sprint 2)
+
+- `files` is the index every later module reads (path, mode, type, hash, entropy).
+- `binaries`, `services`, `network_endpoints`, `credentials` hold parsed facts with the
+  source path and line they came from.
+- `findings` rows are deduplicated by (rule, path, line, title). Operator decisions live on
+  the row (`accepted`, `rejected`, `snoozed`, with a note) and survive re-sweeps.
+- `missedfindings` rule caps (200 hits per rule) are reported, never silent.
+- Jobs in `jobs.SWEEP_AFTER` queue a sweep when they finish successfully.
+
 ## Where future modules plug in
 
 A new module is a class with `name` and `run`, listed in `registry.py`; it gets a CLI
