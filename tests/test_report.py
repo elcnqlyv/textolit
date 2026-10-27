@@ -107,3 +107,32 @@ def test_report_sprint3_sections(tmp_path: Path) -> None:
     assert "00112233445566778899aabbccddeeff" not in body  # key strings are masked
     assert "### Crack queue" in body and "default IoT passwords" in body
     assert "Cracked password for 'admin'" in body
+
+
+def test_report_rollup_and_appendix(tmp_path: Path) -> None:
+    from textolit.core.ledger import add_finding, ensure_heuristic
+
+    img = tmp_path / "fw.bin"
+    img.write_bytes(os.urandom(4096))
+    case = Case.create(tmp_path / "c")
+    Ingest().run(case, image=img)
+    ensure_heuristic(case, "x.a", "t", "t", "high")
+    for n, (conf, sev, tag) in enumerate(
+        (("high", "high", "I1"), ("low", "medium", "I2"), ("low", "medium", "I2"))
+    ):
+        add_finding(
+            case,
+            heuristic_id="x.a",
+            title=f"t-{conf}-{tag}-{sev}",
+            evidence_path=f"p{n}",
+            line=1 if conf == "high" else 2,
+            confidence=conf,
+            severity=sev,
+            owasp_iot=tag,
+        )
+    body = (case.root / Report().run(case).data["path"]).read_text()
+    assert (
+        "## Summary" in body and "| high | 1 | 0 | 0 |" in body and "| medium | 0 | 0 | 2 |" in body
+    )
+    assert "| I2 | Insecure Network Services | 2 |" in body
+    assert "## Evidence appendix" in body and "| image |" in body and "evidence links" in body

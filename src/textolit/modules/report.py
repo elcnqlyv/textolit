@@ -212,6 +212,74 @@ def _crypto_section(conn: Any) -> list[str]:
     return out
 
 
+def _rollup_section(conn: Any) -> list[str]:
+    out = ["## Summary", ""]
+    live = conn.execute(
+        "SELECT severity, confidence, owasp_iot FROM findings"
+        " WHERE status IN ('pending','accepted')"
+    ).fetchall()
+    if not live:
+        return out + ["_No open findings._", ""]
+    sevs = ["high", "medium", "low", "info"]
+    confs = ["high", "med", "low"]
+    grid = [
+        [sev]
+        + [sum(1 for r in live if r["severity"] == sev and r["confidence"] == c) for c in confs]
+        for sev in sevs
+    ]
+    out += ["Open findings (pending and accepted) by severity and confidence.", ""]
+    out.append(_table(["severity", *[f"conf {c}" for c in confs]], grid))
+    cats: dict[str, int] = {}
+    for r in live:
+        cats[r["owasp_iot"] or "unmapped"] = cats.get(r["owasp_iot"] or "unmapped", 0) + 1
+    out.append(
+        _table(
+            ["OWASP IoT", "category", "findings"],
+            [
+                [k, OWASP_IOT.get(k, "Unmapped"), cats[k]]
+                for k in [*OWASP_IOT, "unmapped"]
+                if k in cats
+            ],
+        )
+    )
+    status = {
+        r["status"]: r["n"]
+        for r in conn.execute("SELECT status, count(*) AS n FROM findings GROUP BY status")
+    }
+    out.append(_table(["decision", "count"], [[k, status[k]] for k in sorted(status)]))
+    return out
+
+
+def _appendix_section(conn: Any) -> list[str]:
+    out = ["## Evidence appendix", ""]
+    arts = conn.execute(
+        "SELECT kind, path, size, sha256 FROM artifacts WHERE kind NOT IN ('hashlist','report')"
+        " ORDER BY id LIMIT 500"
+    ).fetchall()
+    out.append(
+        _table(
+            ["kind", "path", "size", "sha256"],
+            [
+                [
+                    a["kind"],
+                    a["path"],
+                    a["size"] if a["size"] is not None else "-",
+                    (a["sha256"] or "-")[:16],
+                ]
+                for a in arts
+            ],
+        )
+    )
+    links = _scalar(conn, "SELECT count(*) FROM evidence_links")
+    cmds = _scalar(conn, "SELECT count(*) FROM commands")
+    calls = _scalar(conn, "SELECT count(*) FROM llm_calls")
+    out.append(
+        f"{links} evidence links, {cmds} logged commands, {calls} LLM calls. Raw command output"
+        " lives under `logs/` named by its sha256. Every finding above cites an evidence path.\n"
+    )
+    return out
+
+
 def render_markdown(case: Case) -> str:
     c = case.conn
     name = c.execute("SELECT name FROM cases WHERE id=?", (case.case_id,)).fetchone()[0]
@@ -226,9 +294,9 @@ def render_markdown(case: Case) -> str:
         f"**{pending} leads pending review.** Findings below carry a confidence and an evidence"
         " path; confirm each before relying on it.",
         "",
-        "## Images",
-        "",
     ]
+    out += _rollup_section(c)
+    out += ["## Images", ""]
     imgs = c.execute("SELECT * FROM images ORDER BY id").fetchall()
     out.append(
         _table(
@@ -358,6 +426,7 @@ def render_markdown(case: Case) -> str:
     out += _crypto_section(c)
     out += _findings_section(c)
 
+    out += _appendix_section(c)
     out += ["## Command log (appendix)", ""]
     cmds = c.execute("SELECT * FROM commands ORDER BY id").fetchall()
     out.append(
