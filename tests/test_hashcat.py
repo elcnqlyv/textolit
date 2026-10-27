@@ -37,6 +37,7 @@ def test_default_profile_is_w2_and_gtx1650_safe() -> None:
     assert "-O" in argv  # fast hash: optimized kernels
     assert argv[argv.index("--hwmon-temp-abort") + 1] == "85"
     assert argv[argv.index("--backend-devices-keepfree") + 1] == "10"
+    assert argv[argv.index("--restore-file-path") + 1] == "r.restore"  # pause needs a checkpoint
     assert "--status-json" in argv and "--runtime" not in argv
     assert argv[-2:] == ["h.txt", "w.txt"]
 

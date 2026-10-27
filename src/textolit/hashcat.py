@@ -169,6 +169,8 @@ def build_command(
         str(profile.workload),
         "--session",
         session,
+        "--restore-file-path",
+        restore_file,
         "--potfile-path",
         potfile,
         "-o",
