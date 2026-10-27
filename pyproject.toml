@@ -28,7 +28,7 @@ textolit = "textolit.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-textolit = ["db/migrations/*.sql", "ui/*.tcss", "rules/*.yaml", "prompt_templates/*.txt", "py.typed"]
+textolit = ["db/migrations/*.sql", "ui/*.tcss", "rules/*.yaml", "prompt_templates/*.txt", "data/*.txt", "py.typed"]
 
 [tool.ruff]
 line-length = 100
