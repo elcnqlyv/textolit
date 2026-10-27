@@ -11,6 +11,7 @@ from textolit.modules.ingest import Ingest
 from textolit.modules.llm import Llm
 from textolit.modules.missedfindings import MissedFindings
 from textolit.modules.netmap import NetMap
+from textolit.modules.report import Report
 from textolit.modules.unpack import Unpack
 from textolit.modules.websurface import WebSurface
 
@@ -27,5 +28,6 @@ def builtin_modules() -> dict[str, Module]:
         Crypto(),
         WebSurface(),
         Llm(),
+        Report(),
     ]
     return {m.name: m for m in mods}
