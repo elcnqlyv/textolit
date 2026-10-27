@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.theme import Theme
 from textual.widgets import DataTable, Footer, RichLog, Static, TabbedContent, TabPane
 
@@ -136,6 +137,12 @@ class TextolitApp(App[None]):
     # -- refresh ---------------------------------------------------------
 
     def refresh_panes(self) -> None:
+        try:
+            self._refresh_all()
+        except NoMatches:
+            return  # the timer fired while the screen was being torn down
+
+    def _refresh_all(self) -> None:
         self.query_one("#pane-dashboard", DashboardPane).refresh_data(self.case)
         self.query_one("#pane-entropy", EntropyPane).refresh_data(self.case)
         self.query_one("#pane-artifacts", ArtifactsPane).refresh_data(self.case)
