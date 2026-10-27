@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "textolit"
+version = "0.1.0"
+description = "Firmware triage workbench for CCTV and access-control research."
+readme = "README.md"
+requires-python = ">=3.11"
+# TODO: operator
+authors = []
+dependencies = [
+    "textual>=0.80",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+report = ["python-docx>=1.0", "reportlab>=4"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "types-PyYAML"]
+
+[project.scripts]
+textolit = "textolit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+textolit = ["db/migrations/*.sql", "ui/*.tcss", "rules/*.yaml", "prompt_templates/*.txt", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["src/textolit"]
+
+[[tool.mypy.overrides]]
+# textual ships partial typing for widget internals; ignores are documented per-line elsewhere
+module = ["docx.*", "reportlab.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
