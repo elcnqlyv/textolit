@@ -66,3 +66,43 @@ async def _pane_flow(tmp_path: Path) -> None:
         assert app.query_one("#regions", DataTable).row_count >= 1
         assert app.query_one("#commands", DataTable).row_count >= 1
         assert "0 leads pending review" in str(app.query_one("#dash-body").render())
+
+
+def test_keybinds_and_guard(tmp_path: Path) -> None:
+    asyncio.run(_keys_flow(tmp_path))
+
+
+async def _keys_flow(tmp_path: Path) -> None:
+    from textual.widgets import RichLog
+
+    from textolit.core import jobs
+    from textolit.ui.screens.modals import ConfirmScreen
+
+    case = Case.create(tmp_path / "c")
+    app = TextolitApp(case, splash=False, worker=False)
+    async with app.run_test(size=(120, 40)) as pilot:
+        raw = app.query_one("#raw", RichLog)
+        assert raw.display is False
+        await pilot.press("f2")
+        assert raw.display is True
+        await pilot.press("f4")
+        assert app.query_one("TabbedContent").active == "tab-jobs"
+        # F5 asks for confirmation; declining leaves the LLM off
+        await pilot.press("f5")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert case.llm_enabled is False
+        await pilot.press("f5")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert case.llm_enabled is True
+        assert "LLM ACTIVE" in str(app.query_one("#statusbar").render())
+        # quit is guarded while a job is queued
+        jobs.enqueue(case, "entropy")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("escape")

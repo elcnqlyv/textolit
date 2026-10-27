@@ -182,3 +182,23 @@ class CommandsPane(Vertical):
                 for r in rows
             ],
         )
+
+
+class JobsPane(Vertical):
+    def compose(self) -> ComposeResult:
+        yield Static(
+            "Job queue  (state is persisted; killed jobs show as interrupted)", classes="heading"
+        )
+        yield DataTable(id="jobs", cursor_type="row")
+
+    def on_mount(self) -> None:
+        self.query_one("#jobs", DataTable).add_columns(
+            "id", "module", "status", "progress", "message"
+        )
+
+    def refresh_data(self, case: Case) -> None:
+        rows = [
+            (j.id, j.module, j.status, f"{blocks(j.progress)} {j.progress:4.0%}", j.message)
+            for j in jobs.list_jobs(case)
+        ]
+        sync_table(self.query_one("#jobs", DataTable), rows)
