@@ -99,6 +99,140 @@ def _findings_section(conn: Any) -> list[str]:
     return out
 
 
+def _web_section(conn: Any) -> list[str]:
+    out = ["## Web surface (static)", ""]
+    rows = conn.execute("SELECT * FROM web_surface ORDER BY id").fetchall()
+    if not rows:
+        return out + ["_websurface has not run, or no web interface was found._", ""]
+
+    def cat(name: str) -> list[Any]:
+        return [r for r in rows if r["category"] == name]
+
+    def where(r: Any) -> str:
+        return f"{r['source_path']}:{r['source_line']}" if r["source_line"] else r["source_path"]
+
+    out.append("No requests were made. Everything below comes from the extracted files.\n")
+    out += ["### Servers", ""]
+    out.append(
+        _table(
+            ["server", "version or note", "confidence", "source"],
+            [[r["key"], r["value"], r["confidence"], where(r)] for r in cat("server")],
+        )
+    )
+    out += ["### Authentication (guess)", ""]
+    out.append(
+        _table(
+            ["mechanism", "detail", "confidence", "source"],
+            [[r["key"], r["value"], r["confidence"], where(r)] for r in cat("auth")],
+        )
+    )
+    out += ["### Upload and firmware handlers", ""]
+    out.append(
+        _table(
+            ["url", "why", "confidence", "source"],
+            [[r["key"], r["value"], r["confidence"], where(r)] for r in cat("upload")],
+        )
+    )
+    eps = cat("endpoint")
+    out += [f"### Endpoints ({len(eps)} found, first 80 shown)", ""]
+    out.append(
+        _table(
+            ["url", "kind or method", "source"],
+            [[r["key"], r["value"], where(r)] for r in eps[:80]],
+        )
+    )
+    creds = [r for r in cat("credential")]
+    out += ["### Credentials visible in front-end code (values masked)", ""]
+    out.append(
+        _table(
+            ["kind", "value", "source"],
+            [
+                [r["key"], "***" if r["key"] != "prefilled-username" else r["value"], where(r)]
+                for r in creds
+            ],
+        )
+    )
+    return out
+
+
+def _crypto_section(conn: Any) -> list[str]:
+    out = ["## Crypto material", ""]
+    mats = conn.execute("SELECT * FROM crypto_materials ORDER BY id").fetchall()
+    if not mats:
+        return out + ["_crypto has not run, or nothing was found._", ""]
+    hashes = [m for m in mats if m["kind"] == "hash"]
+    out += ["### Password hashes", ""]
+    out.append(
+        _table(
+            ["user", "algorithm", "hashcat -m", "cracked", "source"],
+            [
+                [
+                    m["username"] or "-",
+                    m["algo"],
+                    m["hashcat_mode"] if m["hashcat_mode"] is not None else "none",
+                    _mask(m["cracked"]) if m["cracked"] else "no",
+                    f"{m['source_path']}:{m['source_line']}",
+                ]
+                for m in hashes
+            ],
+        )
+    )
+    certs = [m for m in mats if m["kind"] == "cert"]
+    out += ["### Certificates", ""]
+    rows = []
+    for m in certs:
+        d = json.loads(m["detail"])
+        rows.append(
+            [
+                d.get("subject"),
+                d.get("sig_algo"),
+                d.get("key_bits"),
+                d.get("not_after"),
+                "yes" if d.get("expired") else "no",
+                m["source_path"],
+            ]
+        )
+    out.append(_table(["subject", "signature", "key bits", "not after", "expired", "source"], rows))
+    keys = [m for m in mats if m["kind"] == "private_key"]
+    out += ["### Private keys and key strings", ""]
+    out.append(
+        _table(
+            ["kind", "type", "detail", "source"],
+            [
+                [
+                    m["kind"],
+                    m["algo"],
+                    "encrypted" if json.loads(m["detail"]).get("encrypted") else "",
+                    f"{m['source_path']}:{m['source_line']}",
+                ]
+                for m in keys
+            ]
+            + [
+                [
+                    "key_string",
+                    m["algo"],
+                    _mask(m["value"]),
+                    f"{m['source_path']}:{m['source_line']}",
+                ]
+                for m in mats
+                if m["kind"] == "key_string"
+            ],
+        )
+    )
+    tasks = conn.execute("SELECT * FROM crack_tasks ORDER BY id").fetchall()
+    out += ["### Crack queue", ""]
+    out.append(
+        _table(
+            ["id", "attack", "status", "found", "note"],
+            [
+                [t["id"], t["label"], t["status"], f"{t['recovered']}/{t['total']}", t["message"]]
+                for t in tasks
+            ],
+        )
+    )
+    return out
+
+
 def render_markdown(case: Case) -> str:
     c = case.conn
     name = c.execute("SELECT name FROM cases WHERE id=?", (case.case_id,)).fetchone()[0]
@@ -241,6 +375,8 @@ def render_markdown(case: Case) -> str:
         )
     )
 
+    out += _web_section(c)
+    out += _crypto_section(c)
     out += _findings_section(c)
 
     out += ["## Command log (appendix)", ""]

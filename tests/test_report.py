@@ -69,3 +69,41 @@ def test_report_masks_secrets_in_snippets(tmp_path: Path) -> None:
     MissedFindings().run(case)
     body = (case.root / Report().run(case).data["path"]).read_text()
     assert "password=" in body and "letmein" not in body
+
+
+def test_report_sprint3_sections(tmp_path: Path) -> None:
+    import hashlib
+
+    from textolit import crack
+    from textolit.core.ledger import add_artifact
+    from textolit.hashcat import Profile
+    from textolit.modules.crypto import Crypto
+    from textolit.modules.fswalk import FsWalk
+    from textolit.modules.websurface import WebSurface
+
+    fake = str(Path(__file__).parent / "fake_hashcat.py")
+    case = Case.create(tmp_path / "c")
+    root = case.extract_dir / "image1" / "squashfs-root"
+    (root / "etc").mkdir(parents=True)
+    (root / "www/cgi-bin").mkdir(parents=True)
+    md5 = hashlib.md5(b"admin").hexdigest()
+    (root / "etc/shadow").write_text(f"admin:{md5}:0:0:::\n")  # raw md5 in a shadow-style file
+    (root / "etc/app.conf").write_text('aes_key="00112233445566778899aabbccddeeff"\n')
+    (root / "www/index.html").write_text(
+        '<form action="/cgi-bin/login.cgi"><input type="password" value="hunter22"></form>'
+        '<form action="/cgi-bin/up.cgi" enctype="multipart/form-data"><input type="file"></form>'
+    )
+    (root / "www/cgi-bin/login.cgi").write_text("#!/bin/sh\n")
+    add_artifact(case, "fs_root:squashfs", root, hash_it=False)
+    FsWalk().run(case)
+    Crypto().run(case)
+    WebSurface().run(case)
+    crack.plan_tasks(case, Profile(binary=fake), masks=False)
+    crack.run_next(case)
+    body = (case.root / Report().run(case).data["path"]).read_text()
+    assert "## Web surface (static)" in body and "/cgi-bin/up.cgi" in body
+    assert "html-form-login" in body and "hunter22" not in body
+    assert "## Crypto material" in body and "| admin | md5 | 0 | ad*** |" in body
+    assert "00112233445566778899aabbccddeeff" not in body  # key strings are masked
+    assert "### Crack queue" in body and "default IoT passwords" in body
+    assert "Cracked password for 'admin'" in body
