@@ -7,6 +7,7 @@ from textolit.modules.binintel import BinIntel
 from textolit.modules.crypto import Crypto
 from textolit.modules.entropy import Entropy
 from textolit.modules.fswalk import FsWalk
+from textolit.modules.hashcat_run import HashcatRun
 from textolit.modules.ingest import Ingest
 from textolit.modules.llm import Llm
 from textolit.modules.missedfindings import MissedFindings
@@ -29,5 +30,6 @@ def builtin_modules() -> dict[str, Module]:
         WebSurface(),
         Llm(),
         Report(),
+        HashcatRun(),
     ]
     return {m.name: m for m in mods}

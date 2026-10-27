@@ -14,6 +14,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any
 
+from textolit import crack
 from textolit.core.case import Case, utcnow
 from textolit.modules.base import ModuleResult
 from textolit.modules.registry import builtin_modules
@@ -21,7 +22,9 @@ from textolit.modules.registry import builtin_modules
 POLL_SECONDS = 0.25
 # Modules whose output feeds the rule sweep. The sweep is queued, never run inline, so it
 # cannot block the job that produced the new evidence.
-SWEEP_AFTER = frozenset({"fswalk", "binintel", "netmap"})
+SWEEP_AFTER = frozenset({"fswalk", "binintel", "netmap", "crypto", "websurface"})
+# Long GPU jobs get their own worker so analysis jobs never queue behind a crack.
+LONG_MODULES = frozenset({"hashcat"})
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ def list_jobs(case: Case) -> list[Job]:
 
 
 def mark_interrupted(case: Case) -> int:
+    crack.mark_interrupted(case)
     with case.conn:
         cur = case.conn.execute(
             "UPDATE jobs SET status='interrupted', finished_at=?,"
@@ -152,8 +156,9 @@ def drain(case: Case) -> list[ModuleResult]:
 class Worker:
     """Background thread that drains the queue until stopped."""
 
-    def __init__(self, case: Case) -> None:
+    def __init__(self, case: Case, *, long_jobs: bool = False) -> None:
         self._root = case.root
+        self._long = long_jobs
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="textolit-worker", daemon=True)
 
@@ -170,8 +175,12 @@ class Worker:
         case = Case.open(self._root)
         try:
             while not self._stop.is_set():
+                marks = ",".join("?" for _ in LONG_MODULES)
+                op = "IN" if self._long else "NOT IN"
                 row = case.conn.execute(
-                    "SELECT id FROM jobs WHERE status='queued' ORDER BY id LIMIT 1"
+                    f"SELECT id FROM jobs WHERE status='queued' AND module {op} ({marks})"
+                    " ORDER BY id LIMIT 1",
+                    tuple(LONG_MODULES),
                 ).fetchone()
                 if row is None:
                     self._stop.wait(POLL_SECONDS)

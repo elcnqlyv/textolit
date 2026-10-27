@@ -60,3 +60,31 @@ def test_sweep_is_queued_after_indexing(tmp_path: Path) -> None:
     assert mods.count("missedfindings") == 1  # deduplicated while one is queued
     assert all(r.ok for r in results), [r.errors for r in results]
     assert case.conn.execute("SELECT count(*) FROM findings WHERE status='pending'").fetchone()[0]
+
+
+def test_long_jobs_stay_off_the_analysis_worker(tmp_path: Path) -> None:
+    case = Case.create(tmp_path / "c")
+    entropy = jobs.enqueue(case, "entropy")
+    crack_job = jobs.enqueue(case, "hashcat")
+    worker = jobs.Worker(case)  # analysis worker
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        st = {j.id: j.status for j in jobs.list_jobs(case)}
+        if st[entropy] != "queued":
+            break
+        time.sleep(0.05)
+    time.sleep(0.5)
+    worker.stop()
+    worker.join(2)
+    st = {j.id: j.status for j in jobs.list_jobs(case)}
+    assert st[entropy] == "failed" and st[crack_job] == "queued"
+
+    long_worker = jobs.Worker(case, long_jobs=True)
+    long_worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline and jobs.list_jobs(case)[-1].status == "queued":
+        time.sleep(0.05)
+    long_worker.stop()
+    long_worker.join(2)
+    assert jobs.list_jobs(case)[-1].status == "failed"  # no tasks planned: reported, not silent
