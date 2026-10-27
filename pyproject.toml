@@ -7,6 +7,8 @@ name = "textolit"
 version = "0.1.0"
 description = "Firmware triage workbench for CCTV and access-control research."
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # TODO: operator
 authors = []

@@ -238,7 +238,7 @@ case-foo/
 
 ## License
 
-TODO: operator. No license has been chosen for this repository yet.
+GPL-3.0-or-later. Copyright (C) 2026 Elchin Guliyev. See [LICENSE](LICENSE).
 
 For authorized security testing only. You must have written permission before you analyze firmware you do not own.
 
