@@ -357,7 +357,7 @@ def render_markdown(case: Case, include_llm: bool = False) -> str:
     out = [
         f"# Textolit report: {name}",
         "",
-        "Textolit \u2014 firmware triage workbench for CCTV and access-control research.",
+        "Textolit: firmware triage workbench for CCTV and access-control research.",
         "",
         f"Report time {utcnow()}. Authorized testing only; leads, not verdicts.",
         "",

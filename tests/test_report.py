@@ -17,7 +17,7 @@ def test_report_markdown(tmp_path: Path) -> None:
     Entropy().run(case)
     res = Report().run(case)
     text = (case.root / res.data["path"]).read_text()
-    assert "Textolit — firmware triage workbench" in text
+    assert "Textolit: firmware triage workbench" in text
     assert "encrypted" in text and "not a clean bill of health" in text
     assert "Command log" in text and "file -b" in text
 

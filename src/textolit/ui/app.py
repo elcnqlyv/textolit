@@ -35,7 +35,7 @@ from textolit.ui.screens.modals import ConfirmScreen, HelpScreen
 from textolit.ui.screens.splash import SplashScreen
 from textolit.ui.widgets import TraceRule, blocks, toggle
 
-TAGLINE = "Textolit — firmware triage workbench for CCTV and access-control research."
+TAGLINE = "Textolit: firmware triage workbench for CCTV and access-control research."
 
 PCB_THEME = Theme(
     name="textolit",

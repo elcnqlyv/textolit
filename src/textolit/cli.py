@@ -16,7 +16,7 @@ from textolit.core.ledger import decide
 from textolit.modules.base import ModuleResult
 from textolit.modules.registry import builtin_modules
 
-TAGLINE = "Textolit — firmware triage workbench for CCTV and access-control research."
+TAGLINE = "Textolit: firmware triage workbench for CCTV and access-control research."
 
 # Modules with their own hand-written command instead of the generic one.
 CUSTOM_COMMANDS = {"llm"}
