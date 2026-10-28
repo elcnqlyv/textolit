@@ -104,3 +104,9 @@ subcommand automatically and a job type for the TUI.
 - Classifiers that guess (e.g. encrypted vs compressed) are labelled leads in output.
 - LLM is off per case by default; enabling requires confirmation and every call is logged.
 - Extraction never follows symlinks out of the case tree; escaping links are reported.
+
+## Extraction fallback and rule statistics
+
+`carve.py` holds the pure-Python recognisers: uImage and TRX headers (with CRC checks), gzip, xz and lzma-alone streams, and validated magic for squashfs, cramfs, cpio, jffs2 and UBI. `unpack` calls it only when binwalk leaves no filesystem root. It works through layers (image, wrapper payload, inflated stream) up to three deep, carves each hit into `artifacts/carved/`, and runs the matching extractor under `umask 0`. cpio uses `cpio`, cramfs uses `cramfsck` or `7z`, jffs2 needs `jefferson` and UBI needs `ubireader_extract_files`. When a filesystem is recognised but no extractor is installed, the module warns and records it in `unextracted` and does not stay silent. If nothing is recognised, it says so and points at the entropy tab.
+
+Each sweep writes `rule_stats` (migration 0003): matches per rule including those past the cap, and rows recorded. `findings --stats` joins that with accept and reject decisions to flag noisy and silent rules.

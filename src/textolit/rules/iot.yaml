@@ -1,0 +1,178 @@
+# CCTV and access-control leads: camera streams, device web interfaces, update paths and
+# card-reader secrets. Same rule as the other packs: a hit is a lead to check, not a verdict.
+pack: iot
+rules:
+  - id: iot.url-embedded-credentials
+    title: Credentials embedded in a stream, web or FTP URL
+    kind: content
+    bytes: true
+    confidence: med
+    severity: high
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)\b(?:rtsp|rtmp|https?|ftp)://[^/\s:@"''<>]{2,}:[^/\s@"''<>$%{}]{2,}@[\w.-]+'
+    exclude: '(?i)user:pass|username:password|<user>|example\.'
+    skip_paths: '^/(usr/share/doc|usr/share/man)/'
+    max_per_file: 3
+
+  - id: iot.stream-auth-disabled
+    title: Stream or discovery service configured without authentication
+    kind: content
+    confidence: med
+    severity: high
+    cwe: CWE-306
+    owasp_iot: I2
+    pattern: '(?i)\b(?:rtsp|onvif|rtmp|snmp)[_.-]?(?:auth\w*|login)\s*[=:]\s*["'']?(?:0|false|off|no|none|disabled?)\b'
+    max_per_file: 3
+
+  - id: iot.mqtt-anonymous
+    title: MQTT broker allows anonymous clients
+    kind: content
+    confidence: high
+    severity: medium
+    cwe: CWE-306
+    owasp_iot: I2
+    pattern: '(?i)^\s*allow_anonymous\s+true\b'
+    max_per_file: 1
+
+  - id: iot.ftp-anonymous
+    title: FTP server allows anonymous login
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-306
+    owasp_iot: I2
+    pattern: '(?i)^\s*anonymous_enable\s*=\s*yes\b'
+    max_per_file: 1
+
+  - id: iot.snmp-default-community
+    title: SNMP community string left at public or private
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-1188
+    owasp_iot: I9
+    pattern: '(?i)\b(?:rocommunity|rwcommunity)\s+(?:public|private)\b|\bcommunity\s*[=:]\s*["'']?(?:public|private)\b'
+    max_per_file: 2
+
+  - id: iot.wifi-psk-in-config
+    title: Wi-Fi passphrase stored in a hostapd or supplicant config
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)^\s*(?:wpa_passphrase|psk|wpa_psk)\s*=\s*["'']?(?![$%{<])[^\s"''#]{8,}'
+    globs: ['*hostapd*', '*wpa_supplicant*', '*wlan*.conf', '*wifi*.conf', '*ap*.conf']
+    max_per_file: 3
+
+  - id: iot.chpasswd-in-script
+    title: Script sets an account password with fixed text
+    kind: content
+    confidence: med
+    severity: high
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?i)\becho\b[^|\n]*\|\s*(?:chpasswd|passwd)\b|\bpasswd\b[^\n]*<<<'
+    globs: ['*.sh', '/etc/init.d/*', '/etc/rc*', '/etc/*.d/*', '*/rcS', '*/rc.local']
+    max_per_file: 3
+
+  - id: iot.shipped-ssh-host-key
+    title: SSH host key shipped in the image (shared by every unit)
+    kind: path
+    confidence: high
+    severity: medium
+    cwe: CWE-321
+    owasp_iot: I7
+    pattern: '(?i)(?:^|/)(?:dropbear_(?:rsa|dss|ecdsa|ed25519)_host_key|ssh_host_\w+_key)$'
+
+  - id: iot.authorized-keys-shipped
+    title: SSH authorized_keys file shipped in the image
+    kind: path
+    confidence: med
+    severity: medium
+    cwe: CWE-798
+    owasp_iot: I1
+    pattern: '(?:^|/)authorized_keys2?$'
+
+  - id: iot.cgi-eval-request-data
+    title: CGI script passes request data to a shell or eval
+    kind: content
+    confidence: low
+    severity: high
+    cwe: CWE-78
+    owasp_iot: I3
+    pattern: '(?i)\b(?:eval|system|popen|sh\s+-c|bash\s+-c)\b[^\n]*\$\{?(?:QUERY_STRING|REQUEST_URI|HTTP_[A-Z_]+|CONTENT_LENGTH|POST_DATA)'
+    globs: ['*/cgi-bin/*', '*.cgi', '*/www/*.sh', '*/web/*.sh']
+    max_per_file: 3
+
+  - id: iot.update-over-http
+    title: Firmware or package fetched over plain HTTP
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-494
+    owasp_iot: I4
+    pattern: '(?i)\b(?:wget|curl|tftp|ftpget)\b[^\n]*(?:http|ftp)://[^\s"'']+\.(?:bin|img|fw|pkg|upg|tar|tgz|gz|zip|sh)\b'
+    globs: ['*.sh', '/etc/*', '/usr/sbin/*', '/usr/bin/*', '/sbin/*', '/bin/*']
+    exclude: '^\s*#'
+    max_per_file: 3
+
+  - id: iot.update-checksum-only
+    title: Update script verifies integrity with a checksum, no signature
+    kind: content
+    confidence: low
+    severity: medium
+    cwe: CWE-345
+    owasp_iot: I4
+    pattern: '(?i)(?:upgrade|update|firmware|fwup|flash)[^\n]*\b(?:md5sum|crc32|cksum)\b|\b(?:md5sum|crc32|cksum)\b[^\n]*(?:upgrade|firmware|fwup)'
+    globs: ['*.sh', '/etc/*', '/usr/sbin/*', '/sbin/*']
+    exclude: '^\s*#'
+    max_per_file: 2
+
+  - id: iot.tls-check-disabled-flag
+    title: curl or wget run without certificate verification
+    kind: content
+    confidence: med
+    severity: medium
+    cwe: CWE-295
+    owasp_iot: I7
+    pattern: '(?i)\bcurl\b[^\n|;]*\s(?:-k|--insecure)\b|\bwget\b[^\n|;]*--no-check-certificate'
+    globs: ['*.sh', '/etc/*', '/usr/sbin/*', '/usr/bin/*', '/sbin/*']
+    exclude: '^\s*#'
+    max_per_file: 3
+
+  - id: iot.uboot-bootdelay
+    title: U-Boot console reachable (nonzero bootdelay)
+    kind: content
+    confidence: low
+    severity: low
+    cwe: CWE-1191
+    owasp_iot: I10
+    pattern: '^\s*bootdelay\s*=\s*[1-9]\d*\s*$'
+    globs: ['*fw_env*', '*uboot*env*', '*u-boot*env*', '*/env.txt', '*.env']
+    max_per_file: 1
+
+  - id: iot.osdp-default-key
+    title: OSDP default secure-channel base key (0x30..0x3F)
+    kind: content
+    bytes: true
+    confidence: med
+    severity: high
+    cwe: CWE-1188
+    owasp_iot: I7
+    pattern: '(?i)(?:0x)?303132333435363738393a3b3c3d3e3f|0123456789:;<=>\?|\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\x3e\x3f'
+    skip_paths: '^/usr/share/'
+    max_per_file: 1
+
+  - id: iot.mifare-default-key
+    title: MIFARE Classic well-known sector key in firmware
+    kind: content
+    bytes: true
+    confidence: low
+    severity: medium
+    cwe: CWE-1188
+    owasp_iot: I7
+    pattern: '(?i)\b(?:a0a1a2a3a4a5|d3f7d3f7d3f7|4d3a99c351dd|b0b1b2b3b4b5)\b|\xa0\xa1\xa2\xa3\xa4\xa5|\xd3\xf7\xd3\xf7\xd3\xf7'
+    skip_paths: '^/usr/share/|\.(txt|md|html?)$'
+    max_per_file: 1

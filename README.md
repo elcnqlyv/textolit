@@ -48,7 +48,7 @@ $ textolit tui ./case-foo
 
 One command-line tool and one terminal workbench turn a vendor firmware download into an auditable case:
 
-- **Ingest and unpack**: hash the image, run `binwalk` recursively, detect squashfs, ubifs, jffs2 and cramfs roots
+- **Ingest and unpack**: hash the image, run `binwalk` recursively, detect squashfs, ubifs, jffs2 and cramfs roots. When binwalk finds no filesystem, a fallback strips uImage and TRX headers, inflates gzip, xz and lzma streams, and carves squashfs, cpio and cramfs by magic
 - **Entropy map**: sliding-window entropy that marks plain, compressed and possibly encrypted regions
 - **File index**: every extracted file with type, hash, entropy and mode, plus the paths that matter on CCTV and access-control devices
 - **Binary inventory**: ELF architecture, libraries, stripped or not, and version strings with CVE hints
@@ -265,13 +265,21 @@ The workbench opens on the signature banner, then the dashboard. Tabs cover Dash
 
 ## Rule packs
 
-Packs live in `src/textolit/rules/` as YAML: `creds`, `services` and `files`. Load extra packs with `--rules-dir`:
+Packs live in `src/textolit/rules/` as YAML: `creds`, `services`, `files` and `iot`. The `iot` pack covers camera and access-control leads such as credentials inside RTSP URLs, streams with authentication switched off, firmware fetched over HTTP, shipped SSH host keys, OSDP and MIFARE default keys, and CGI scripts that pass request data to a shell. Load extra packs with `--rules-dir`:
 
 ```bash
 textolit missedfindings ./case-foo --rules-dir ./my-rules
 ```
 
 A rule has a `kind` of `content`, `path`, `perm` or `magic`. It also has a confidence of `low`, `med` or `high`, plus optional CWE and OWASP IoT tags.
+
+To see which rules are noisy, list the hit counts from the last sweep next to your accept and reject decisions:
+
+```bash
+textolit findings ./case-foo --stats
+```
+
+A rule is flagged when it passes its per-rule cap, when most of its decided hits were rejected, or when it matched nothing at all.
 
 ```yaml
 - id: svc.dropbear-blank-password

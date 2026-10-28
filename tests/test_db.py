@@ -24,7 +24,7 @@ EXPECTED = {
 
 def test_migration_creates_schema_and_is_idempotent(tmp_path: Path) -> None:
     conn = connect(tmp_path / "case.db")
-    assert migrate(conn) == [1, 2]
+    assert migrate(conn) == [1, 2, 3]
     assert migrate(conn) == []
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables >= EXPECTED

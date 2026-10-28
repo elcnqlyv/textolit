@@ -199,6 +199,13 @@ def match_file(rule: Rule, row: Any, read: Any) -> list[Hit]:
         if data is None or rule.bpattern is None:
             return []
         for m in rule.bpattern.finditer(data):
+            if rule.exclude:
+                # same line-level filter as text rules: look at the line around the match
+                lo = data.rfind(b"\n", 0, m.start()) + 1
+                hi = data.find(b"\n", m.end())
+                around = data[lo : hi if hi != -1 else len(data)][:400]
+                if rule.exclude.search(around.decode("utf-8", "replace")):
+                    continue
             line = (
                 data.count(b"\n", 0, m.start()) + 1 if row["ftype"] in ("text", "script") else None
             )
@@ -275,6 +282,15 @@ def sweep(
                     new[rule.id] = new.get(rule.id, 0) + 1
         if i % 100 == 0:
             progress(i / max(len(rows), 1), f"sweeping {row['path']}")
+    for r in rules:
+        n = total.get(r.id, 0)
+        case.conn.execute(
+            "INSERT INTO rule_stats(heuristic_id, matches, recorded) VALUES (?,?,?) "
+            "ON CONFLICT(heuristic_id) DO UPDATE SET matches=excluded.matches, "
+            "recorded=excluded.recorded, swept_at=CURRENT_TIMESTAMP",
+            (r.id, n, min(n, RULE_CAP)),
+        )
+    case.conn.commit()
     for rid, n in total.items():
         if n > RULE_CAP:
             notes.append(f"rule {rid} hit its cap of {RULE_CAP}; more matches exist (narrow it)")

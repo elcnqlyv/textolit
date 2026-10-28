@@ -14,6 +14,7 @@ from textolit.core import jobs
 from textolit.core.case import Case, CaseError
 from textolit.core.ledger import decide
 from textolit.modules.base import ModuleResult
+from textolit.modules.missedfindings import RULE_CAP
 from textolit.modules.registry import builtin_modules
 
 TAGLINE = "Textolit: firmware triage workbench for CCTV and access-control research."
@@ -74,6 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     fl.add_argument("case", type=Path)
     fl.add_argument(
         "--status", default="pending", choices=["pending", "accepted", "rejected", "snoozed", "all"]
+    )
+    fl.add_argument(
+        "--stats", action="store_true", help="per-rule hit counts and decisions (find noisy rules)"
     )
 
     fd = sub.add_parser("decide", help="accept, reject or snooze a finding")
@@ -316,6 +320,47 @@ def list_findings(case: Case, status: str) -> int:
     return 0
 
 
+NOISY_MATCHES = 100
+NOISY_REJECT_RATIO = 0.7
+NOISY_MIN_DECIDED = 5
+
+
+def rule_stats(case: Case) -> int:
+    """Per-rule matches from the last sweep, with decisions. Flags rules worth tuning."""
+
+    def count(status: str) -> str:
+        return (
+            f"(SELECT count(*) FROM findings f WHERE f.heuristic_id=h.id AND f.status='{status}')"
+        )
+
+    rows = case.conn.execute(
+        f"SELECT h.id, COALESCE(s.matches, 0) AS matches, {count('accepted')} AS acc, "
+        f"{count('rejected')} AS rej, {count('pending')} AS pend "
+        "FROM heuristics h LEFT JOIN rule_stats s ON s.heuristic_id=h.id "
+        "ORDER BY matches DESC, h.id"
+    ).fetchall()
+    if not rows:
+        print("no rules swept yet: run missedfindings first")
+        return 0
+    print(f"{'rule':<36} {'match':>6} {'acc':>4} {'rej':>4} {'pend':>5}  note")
+    for r in rows:
+        decided = r["acc"] + r["rej"]
+        notes = []
+        if r["matches"] > RULE_CAP:
+            notes.append("past the per-rule cap")
+        elif r["matches"] >= NOISY_MATCHES:
+            notes.append("many matches")
+        if decided >= NOISY_MIN_DECIDED and r["rej"] / decided >= NOISY_REJECT_RATIO:
+            notes.append(f"{r['rej']}/{decided} rejected: tighten")
+        if r["matches"] == 0:
+            notes.append("silent")
+        print(
+            f"{r['id']:<36} {r['matches']:>6} {r['acc']:>4} {r['rej']:>4} {r['pend']:>5}  "
+            + ", ".join(notes)
+        )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -336,7 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "crack":
             return crack_command(case, args)
         if args.command == "findings":
-            return list_findings(case, args.status)
+            return rule_stats(case) if args.stats else list_findings(case, args.status)
         if args.command == "decide":
             status = {
                 "accept": "accepted",

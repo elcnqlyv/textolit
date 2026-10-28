@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from textolit.core.case import Case
 from textolit.core.ledger import add_artifact
 from textolit.modules.fswalk import FsWalk
@@ -11,7 +13,7 @@ def test_builtin_packs_load_and_ids_unique() -> None:
     rules = load_builtin_rules()
     ids = [r.id for r in rules]
     assert len(ids) == len(set(ids)) and len(ids) >= 20
-    assert {r.pack for r in rules} == {"creds", "files", "services"}
+    assert {r.pack for r in rules} == {"creds", "files", "iot", "services"}
 
 
 def fixture(tmp: Path) -> Case:
@@ -91,3 +93,89 @@ def test_packs_fire_on_fixture(tmp_path: Path) -> None:
     ]
     assert lines == [2]
     assert "pending review" in res.summary
+
+
+def iot_fixture(tmp: Path) -> Case:
+    case = Case.create(tmp / "c")
+    r = case.extract_dir / "image1" / "squashfs-root"
+    for d in ("etc/init.d", "www/cgi-bin", "etc/dropbear", "root/.ssh", "usr/sbin"):
+        (r / d).mkdir(parents=True)
+    (r / "etc/init.d/rcS").write_text(
+        "#!/bin/sh\n"
+        "echo 'root:hunter2' | chpasswd\n"
+        "wget http://fw.example-vendor.cn/update/fw_v2.bin -O /tmp/fw.bin\n"
+        "curl -k https://cloud.example-vendor.cn/api\n"
+        "# wget http://old.example-vendor.cn/x.bin\n"
+        "md5sum /tmp/fw.bin # upgrade check\n"
+    )
+    (r / "etc/rtsp.conf").write_text(
+        "rtsp_auth = 0\nurl=rtsp://admin:s3cret99@10.0.0.9/stream1\nurl2=rtsp://user:pass@host/x\n"
+    )
+    (r / "etc/mosquitto.conf").write_text("allow_anonymous true\n")
+    (r / "etc/vsftpd.conf").write_text("anonymous_enable=YES\n")
+    (r / "etc/snmpd.conf").write_text("rocommunity public\n")
+    (r / "etc/hostapd.conf").write_text("ssid=cam\nwpa_passphrase=camera1234\n")
+    (r / "etc/dropbear/dropbear_rsa_host_key").write_bytes(b"\x00\x00\x00\x07ssh-rsa")
+    (r / "root/.ssh/authorized_keys").write_text("ssh-rsa AAAA lab\n")
+    (r / "www/cgi-bin/run.cgi").write_text('#!/bin/sh\neval "$QUERY_STRING"\n')
+    (r / "etc/fw_env.config").write_text("bootdelay=3\n")
+    (r / "usr/sbin/osdpd").write_bytes(b"\x7fELF\x00" + bytes(range(0x30, 0x40)) + b"\x00end")
+    (r / "usr/sbin/reader").write_bytes(b"\x7fELF\x00" + b"\xa0\xa1\xa2\xa3\xa4\xa5" + b"\x00")
+    (r / "usr/sbin/plain").write_bytes(b"\x7fELF\x00" + b"\xff" * 6 + b"\x00")
+    add_artifact(case, "fs_root:squashfs", r, hash_it=False)
+    FsWalk().run(case)
+    return case
+
+
+def test_iot_pack_fires_and_stays_quiet(tmp_path: Path) -> None:
+    case = iot_fixture(tmp_path)
+    res = MissedFindings().run(case)
+    assert res.ok, res.errors
+    rows = case.conn.execute(
+        "SELECT f.heuristic_id, f.evidence_path, e.snippet FROM findings f "
+        "JOIN evidence_links e ON e.finding_id=f.id"
+    ).fetchall()
+    hits: dict[str, list[str]] = {}
+    for rid, path, snippet in rows:
+        hits.setdefault(rid, []).append(f"{path.rsplit('/', 1)[-1]}|{snippet}")
+    for rid in (
+        "iot.url-embedded-credentials",
+        "iot.stream-auth-disabled",
+        "iot.mqtt-anonymous",
+        "iot.ftp-anonymous",
+        "iot.snmp-default-community",
+        "iot.wifi-psk-in-config",
+        "iot.chpasswd-in-script",
+        "iot.shipped-ssh-host-key",
+        "iot.authorized-keys-shipped",
+        "iot.cgi-eval-request-data",
+        "iot.update-over-http",
+        "iot.update-checksum-only",
+        "iot.tls-check-disabled-flag",
+        "iot.uboot-bootdelay",
+        "iot.osdp-default-key",
+        "iot.mifare-default-key",
+    ):
+        assert rid in hits, f"{rid} did not fire"
+    assert len(hits["iot.url-embedded-credentials"]) == 1  # user:pass placeholder is excluded
+    assert len(hits["iot.update-over-http"]) == 1  # the commented wget is skipped
+    assert hits["iot.mifare-default-key"][0].startswith("reader|")  # 0xff*6 is not a MIFARE key
+    assert len(hits["iot.mifare-default-key"]) == 1
+
+
+def test_sweep_records_rule_stats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from textolit.cli import main
+
+    case = iot_fixture(tmp_path)
+    MissedFindings().run(case)
+    stat = case.conn.execute(
+        "SELECT matches, recorded FROM rule_stats WHERE heuristic_id='iot.mqtt-anonymous'"
+    ).fetchone()
+    assert tuple(stat) == (1, 1)
+    silent = case.conn.execute(
+        "SELECT matches FROM rule_stats WHERE heuristic_id='svc.gdbserver'"
+    ).fetchone()
+    assert silent[0] == 0
+    assert main(["findings", str(case.root), "--stats"]) == 0
+    out = capsys.readouterr().out
+    assert "iot.mqtt-anonymous" in out and "silent" in out
