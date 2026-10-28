@@ -8,24 +8,22 @@ but a squashfs signature exists, we carve and fall back to unsquashfs/sasquatch.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 from pathlib import Path
 from typing import Any
 
+from textolit import carve
 from textolit.core.case import Case
 from textolit.core.ledger import add_artifact, sha256_file
 from textolit.core.runner import run
 from textolit.modules.base import ModuleResult, ProgressFn, no_progress
 
-FS_ROOT_NAMES = {
-    "squashfs-root": "squashfs",
-    "jffs2-root": "jffs2",
-    "cramfs-root": "cramfs",
-    "ubifs-root": "ubifs",
-    "cpio-root": "cpio",
-}
+FS_ROOT = re.compile(r"^(squashfs|jffs2|cramfs|ubifs|cpio)-root")
+MAX_FALLBACK_IMAGE = 512 << 20
+MAX_LAYER_DEPTH = 3
 SIG_LINE = re.compile(r"^(\d+)\s+0x([0-9A-Fa-f]+)\s+(.*)$")
 FS_WORDS = (
     ("squashfs", "squashfs"),
@@ -86,20 +84,105 @@ def _dedup(root: Path) -> tuple[int, int, int]:
     return files, len(seen), dup_bytes
 
 
-def _carve_fallback(case: Case, image: Path, sigs: list[dict[str, Any]], dest: Path) -> list[str]:
+def _extract_hit(case: Case, hit: carve.FsHit, blob: Path, dest: Path, tag: str) -> str | None:
+    """Extract one carved filesystem. Returns a note when it could not be extracted."""
+    if hit.fs == "squashfs":
+        tool = shutil.which("sasquatch") or shutil.which("unsquashfs")
+        if tool is None:
+            return f"squashfs at {tag}: no unsquashfs/sasquatch installed"
+        cmd = [*UMASK0, tool, "-f", "-d", str(dest / f"squashfs-root-{tag}"), str(blob)]
+    elif hit.fs == "cpio":
+        target = dest / f"cpio-root-{tag}"
+        target.mkdir(parents=True, exist_ok=True)
+        script = 'umask 0; cd "$1" && exec cpio -idm --quiet --no-absolute-filenames < "$2"'
+        cmd = ["sh", "-c", script, "textolit-cpio", str(target), str(blob)]
+    elif hit.fs == "cramfs":
+        target = dest / f"cramfs-root-{tag}"
+        if shutil.which("cramfsck"):
+            cmd = [*UMASK0, "cramfsck", "-x", str(target), str(blob)]
+        elif shutil.which("7z"):
+            cmd = [*UMASK0, "7z", "x", "-y", f"-o{target}", str(blob)]
+        else:
+            return f"cramfs at {tag}: no cramfsck or 7z installed"
+    elif hit.fs == "jffs2":
+        if not shutil.which("jefferson"):
+            return f"jffs2 at {tag}: install jefferson (pip install jefferson) to extract it"
+        cmd = [*UMASK0, "jefferson", "-f", "-d", str(dest / f"jffs2-root-{tag}"), str(blob)]
+    else:
+        if not shutil.which("ubireader_extract_files"):
+            return f"ubi at {tag}: install ubi_reader (pip install ubi_reader) to extract it"
+        cmd = [
+            *UMASK0,
+            "ubireader_extract_files",
+            "-k",
+            "-o",
+            str(dest / f"ubifs-root-{tag}"),
+            str(blob),
+        ]
+    res = run(case, cmd, module="unpack")
+    return None if res.exit_code == 0 else f"{hit.fs} at {tag}: extractor exit {res.exit_code}"
+
+
+def _fallback_extract(
+    case: Case, image: Path, dest: Path
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Strip vendor headers, decompress, and carve filesystems that binwalk did not extract.
+
+    Returns (notes, wrapper records, recognised-but-not-extracted notes).
+    """
+    if image.stat().st_size > MAX_FALLBACK_IMAGE:
+        return ["image too large for the pure-Python fallback scan"], [], []
     notes: list[str] = []
-    tool = shutil.which("sasquatch") or shutil.which("unsquashfs")
-    if tool is None:
-        return ["no unsquashfs/sasquatch available for fallback extraction"]
-    data = image.read_bytes()
-    for sig in (s for s in sigs if s["filesystem"] == "squashfs"):
-        carved = case.artifacts_dir / "carved" / f"{sig['offset']:x}.squashfs"
-        carved.write_bytes(data[sig["offset"] :])
-        add_artifact(case, "carved", carved)
-        target = dest / f"squashfs-root-{sig['offset']:x}"
-        res = run(case, [*UMASK0, tool, "-f", "-d", str(target), str(carved)], module="unpack")
-        notes.append(f"fallback {Path(tool).name} at 0x{sig['offset']:x}: exit {res.exit_code}")
-    return notes
+    wrappers: list[dict[str, Any]] = []
+    unextracted: list[str] = []
+    seen: set[str] = set()
+    layers: list[tuple[str, bytes, int]] = [("img", image.read_bytes(), 0)]
+    while layers:
+        label, data, depth = layers.pop(0)
+        nxt: list[tuple[str, bytes]] = []
+        wrap = carve.find_wrapper(data)
+        if wrap:
+            wrappers.append({"layer": label, **wrap.info, "kind": wrap.kind})
+            notes.append(wrap.describe())
+            nxt.append((f"{label}.{wrap.kind}", data[wrap.payload_offset :][: wrap.payload_len]))
+        dec = carve.decompress_at(data)
+        if dec:
+            notes.append(f"layer {label}: {dec[0]} stream, {len(dec[1])} bytes")
+            nxt.append((f"{label}.{dec[0]}", dec[1]))
+        for hit in carve.find_filesystems(data):
+            blob_data = data[hit.offset :]
+            if hit.length is not None:
+                blob_data = blob_data[: hit.length]
+            digest = hashlib.sha256(blob_data).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            tag = f"{label.replace('.', '-')}-{hit.offset:x}"
+            blob = case.artifacts_dir / "carved" / f"{tag}.{hit.fs}"
+            blob.write_bytes(blob_data)
+            add_artifact(case, "carved", blob)
+            note = _extract_hit(case, hit, blob, dest, tag)
+            if note:
+                unextracted.append(note)
+            else:
+                notes.append(f"fallback extracted {hit.fs} at {label} 0x{hit.offset:x}")
+        if depth + 1 < MAX_LAYER_DEPTH:
+            layers += [(lab, blob_d, depth + 1) for lab, blob_d in nxt]
+    return notes, wrappers, unextracted
+
+
+def _index_roots(case: Case, dest: Path, image_id: int, root_art: int) -> list[dict[str, str]]:
+    roots: list[dict[str, str]] = []
+    for dirpath, dirnames, _files in os.walk(dest, followlinks=False):
+        for d in dirnames:
+            m = FS_ROOT.match(d)
+            if m:
+                p = Path(dirpath) / d
+                add_artifact(
+                    case, f"fs_root:{m.group(1)}", p, image_id=image_id, parent_id=root_art
+                )
+                roots.append({"type": m.group(1), "path": case.rel(p)})
+    return roots
 
 
 class Unpack:
@@ -133,20 +216,21 @@ class Unpack:
         warnings = [ln.strip() for ln in ext.text.splitlines() if ln.startswith("WARNING")]
         errors = [ext.error] if ext.error else []
 
-        if not any(dest.rglob("*")) and any(s["filesystem"] == "squashfs" for s in sigs):
-            progress(0.6, "fallback squashfs extraction")
-            warnings += _carve_fallback(case, image, sigs, dest)
-
-        progress(0.8, "indexing extraction tree")
         root_art = add_artifact(case, "extract_root", dest, image_id=image_id)
-        fs_roots: list[dict[str, str]] = []
-        for dirpath, dirnames, _files in os.walk(dest, followlinks=False):
-            for d in dirnames:
-                fs = FS_ROOT_NAMES.get(d) or ("squashfs" if d.startswith("squashfs-root") else None)
-                if fs:
-                    p = Path(dirpath) / d
-                    add_artifact(case, f"fs_root:{fs}", p, image_id=image_id, parent_id=root_art)
-                    fs_roots.append({"type": fs, "path": case.rel(p)})
+        fs_roots = _index_roots(case, dest, image_id, root_art)
+        wrappers: list[dict[str, Any]] = []
+        unextracted: list[str] = []
+        if not fs_roots:
+            progress(0.6, "fallback: vendor headers, streams and filesystem magic")
+            notes, wrappers, unextracted = _fallback_extract(case, image, dest)
+            warnings += notes + unextracted
+            progress(0.8, "indexing extraction tree")
+            fs_roots = _index_roots(case, dest, image_id, root_art)
+        if not fs_roots:
+            warnings.append(
+                "no filesystem recognised: the image may be encrypted, obfuscated or in an "
+                "unsupported format. Check the entropy tab before reading anything into this."
+            )
 
         escaping = _escaping_symlinks(dest)
         warnings += [f"symlink leaves extraction tree: {s}" for s in escaping]
@@ -166,6 +250,8 @@ class Unpack:
                 "files": files,
                 "unique": unique,
                 "escaping_symlinks": escaping,
+                "wrappers": wrappers,
+                "unextracted": unextracted,
             },
             warnings=warnings,
             errors=errors,
